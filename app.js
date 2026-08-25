@@ -1,7 +1,7 @@
 'use strict';
 /* Palabritas — Spanish spelling practice PWA */
 
-const APP_VERSION = '1.3.0';
+const APP_VERSION = '1.4.0';
 
 /* ---------- helpers ---------- */
 const $ = id => document.getElementById(id);
@@ -152,6 +152,7 @@ function renderHome() {
       ? `▶&nbsp;&nbsp;Resume — ${p.queue.length} to go`
       : '▶&nbsp;&nbsp;¡A practicar!';
     $('btn-startover').classList.toggle('hidden', !p);
+    $('btn-cloud-save').classList.toggle('hidden', list.id.startsWith('cloud-'));
   }
   const others = data.lists.filter(l => l.id !== data.activeListId);
   const box = $('past-lists');
@@ -373,10 +374,37 @@ async function shareActiveList() {
   }
 }
 
-/* ---------- shared lists from GitHub (lists.json in the repo) ---------- */
-// Fetch from the repo's main branch first — that's what github.com edits by
-// default, so a parent's web edit reaches every phone without a redeploy.
-// Fall back to the copy deployed with the site.
+/* ---------- shared lists from GitHub ---------- */
+// Cloud lists live on the repo's main branch in two places:
+//   lists/<id>.json  — one file per list; created by the ☁️ Save to cloud button
+//   lists.json       — legacy single-feed file; still honored (hand-edits, Claude)
+// Both are read from main (raw/API) so a github.com commit reaches every phone
+// with no redeploy.
+
+const REPO = 'gwallee/Palabritas';
+
+function slugify(text) {
+  return stripVowelAccents(String(text).toLowerCase())
+    .replace(/ñ/g, 'n')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40) || 'lista';
+}
+
+// ☁️ Save to cloud: open GitHub's new-file page pre-filled with this list —
+// the parent just taps Commit. No token, no credentials in the app.
+function cloudSaveActiveList() {
+  const list = activeList();
+  if (!list) return;
+  if (list.id.startsWith('cloud-')) { alert('This list is already in the cloud.'); return; }
+  const id = new Date().toISOString().slice(0, 10) + '-' + slugify(list.name);
+  const body = JSON.stringify({ id, name: list.name, words: list.words }, null, 2) + '\n';
+  const url = 'https://github.com/' + REPO + '/new/main'
+    + '?filename=' + encodeURIComponent('lists/' + id + '.json')
+    + '&value=' + encodeURIComponent(body);
+  window.open(url, '_blank');
+}
+
 async function fetchListsJson() {
   try {
     const r = await fetch('https://raw.githubusercontent.com/gwallee/Palabritas/main/lists.json', { cache: 'no-cache' });
@@ -387,32 +415,79 @@ async function fetchListsJson() {
   return r2.json();
 }
 
+// One file per list in lists/ on main. The directory listing gives each file's
+// blob sha, so unchanged lists cost no extra fetches on later syncs.
+async function fetchCloudFiles() {
+  const entries = [];
+  try {
+    const r = await fetch('https://api.github.com/repos/' + REPO + '/contents/lists?ref=main',
+      { cache: 'no-cache', headers: { accept: 'application/vnd.github+json' } });
+    if (!r.ok) return entries;   // 404 = no lists/ folder yet
+    const files = await r.json();
+    if (!Array.isArray(files)) return entries;
+    // date-prefixed filenames sort chronologically — newest first
+    files.sort((a, b) => (a.name < b.name ? 1 : -1));
+    for (const f of files) {
+      if (f.type !== 'file' || !f.name.endsWith('.json') || !f.download_url) continue;
+      const id = f.name.slice(0, -5);
+      const existing = data.lists.find(l => l.id === 'cloud-' + id);
+      if (existing && existing.cloudSha === f.sha) continue;   // unchanged
+      try {
+        const fr = await fetch(f.download_url, { cache: 'no-cache' });
+        if (!fr.ok) continue;
+        const j = await fr.json();
+        entries.push({ id, name: j.name, words: j.words, sha: f.sha });
+      } catch (e) { /* skip malformed/unreachable file */ }
+    }
+  } catch (e) { /* offline — no problem */ }
+  return entries;
+}
+
+// After a list is committed to the cloud and synced back, drop the local copy
+// it was promoted from (same name, same words) so it doesn't show up twice.
+function dropPromotedLocal(cloudId, name, words) {
+  const key = words.map(canon).sort().join('\n');
+  const dup = data.lists.find(l =>
+    !l.id.startsWith('cloud-') &&
+    canon(l.name) === canon(name) &&
+    l.words.length === words.length &&
+    l.words.map(canon).sort().join('\n') === key);
+  if (!dup) return;
+  data.lists = data.lists.filter(l => l.id !== dup.id);
+  if (data.activeListId === dup.id) data.activeListId = cloudId;
+  if (data.paused && data.paused.listId === dup.id) data.paused = null;
+}
+
 async function syncCloudLists() {
   try {
-    const cloud = await fetchListsJson();
-    if (!Array.isArray(cloud)) return;
+    const entries = [];
+    const legacy = await fetchListsJson();
+    if (Array.isArray(legacy)) legacy.forEach(e => entries.push(e));
+    (await fetchCloudFiles()).forEach(e => entries.push(e));
     let changed = false;
     const addedIds = [];
-    cloud.forEach(cl => {
+    entries.forEach(cl => {
       if (!cl || !cl.id || !Array.isArray(cl.words) || !cl.words.length) return;
       const id = 'cloud-' + String(cl.id);
       const name = String(cl.name || cl.id);
       const words = cl.words.map(String);
       const existing = data.lists.find(l => l.id === id);
-      if (existing) {   // the repo file is the source of truth for cloud lists
+      if (existing) {   // the repo is the source of truth for cloud lists
         if (existing.name !== name || JSON.stringify(existing.words) !== JSON.stringify(words)) {
           existing.name = name;
           existing.words = words;
           if (data.paused && data.paused.listId === id) data.paused = null;
           changed = true;
         }
+        if (cl.sha && existing.cloudSha !== cl.sha) { existing.cloudSha = cl.sha; changed = true; }
       } else {
-        data.lists.unshift({ id, name, words, createdAt: Date.now() });
+        data.lists.unshift({ id, name, words, createdAt: Date.now(), cloudSha: cl.sha });
+        dropPromotedLocal(id, name, words);
         addedIds.push(id);
         changed = true;
       }
     });
-    if (addedIds.length) data.activeListId = addedIds[0];  // newest-first in lists.json
+    if (addedIds.length) data.activeListId = addedIds[0];  // entries arrive newest-first
     if (changed) { save(); renderHome(); }
   } catch (e) { /* offline — no problem */ }
 }
@@ -833,6 +908,7 @@ function init() {
   $('btn-save-list').addEventListener('click', saveList);
   $('btn-delete-list').addEventListener('click', deleteList);
   $('btn-share-active').addEventListener('click', shareActiveList);
+  $('btn-cloud-save').addEventListener('click', cloudSaveActiveList);
   $('btn-scan').addEventListener('click', () => {
     if (typeof Tesseract === 'undefined') {
       alert('The scanner needs its one-time download — open the app once with internet, then try again.');

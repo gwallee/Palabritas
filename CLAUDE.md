@@ -71,17 +71,23 @@ backend; word lists and scores live in each device's localStorage.
 1. **📤 Share list** (home) → share sheet with plain text: `📚 <name>` header line + one
    word per line + app URL. On the receiving phone: New word list → paste into the words
    box → `absorbSharedName()` lifts the 📚 header into the name field automatically.
-2. **`lists.json` in the repo** (the "universal" store):
-   `[{ "id": "2026-08-31", "name": "Week of Aug 31", "words": ["gato", ...] }, ...]`
-   newest first. The app fetches it from **raw.githubusercontent.com/…/main/lists.json**
-   first (so a github.com web edit on main reaches phones with NO redeploy — this is the
-   parent self-serve path), falling back to the copy deployed with the site. New ids are
-   imported as `cloud-<id>` and the newest new one becomes the active list. The repo file
-   is the source of truth for cloud lists: repo edits overwrite them on sync (local edits
-   to cloud lists get reverted). Two workflows: Brian edits lists.json on github.com from
-   any device (main branch, i.e. the default — commit and done), or tells Claude the
-   week's words. A malformed JSON edit fails silently (sync just skips it) — if a list
-   doesn't appear on phones, validate the JSON first.
+2. **Cloud lists in the repo** (all read from **main**, so a github.com commit reaches
+   phones with NO redeploy). Two stores, both honored by sync:
+   - `lists/<id>.json` — one file per list, `{ "id", "name", "words": [...] }`. Created by
+     the **☁️ Save to cloud** button (home screen, device-created lists only): it opens
+     GitHub's new-file page pre-filled via `/new/main?filename=lists/<id>.json&value=…` —
+     Brian (signed into github.com in Safari) just taps Commit. No token, no credentials
+     in the app. Ids are `YYYY-MM-DD-<name-slug>` so the directory sorts chronologically.
+     Sync lists the folder via the GitHub contents API (unauthenticated, 60 req/h/IP) and
+     uses each file's blob `sha` (stored as `cloudSha` on the list) to skip unchanged
+     files. When a synced cloud list matches a local list by name+words, the local one is
+     dropped (it was just promoted) so it doesn't appear twice.
+   - `lists.json` — legacy single feed, newest first, fetched from raw main with the
+     deployed copy as fallback. Still fine for hand edits / Claude-committed lists.
+   New ids are imported as `cloud-<id>` and the newest new one becomes the active list.
+   The repo is the source of truth for cloud lists: repo edits overwrite them on sync.
+   A malformed JSON file fails silently (sync skips it) — if a list doesn't appear on
+   phones, validate the JSON first.
 
 ## Practice loop specifics
 
@@ -122,8 +128,9 @@ git push origin main && git push origin main:gh-pages
 ## State / history
 
 - v1.0.0: core app. v1.1.0: embedded OCR, emoji hints, sentences, share + lists.json sync.
-  v1.2.0: practice-session resume. v1.3.0 (current): lists.json fetched from raw main (see
-  above), SW precache uses no-cache requests.
+  v1.2.0: practice-session resume. v1.3.0: lists.json fetched from raw main, SW precache
+  uses no-cache requests. v1.4.0 (current): ☁️ Save to cloud (token-free, prefilled GitHub
+  commit page) + per-file `lists/` store with sha-based sync.
 - `lists.json` is committed empty (`[]`) — no AI/test lists were ever deployed; a "Cloud
   Test List" existed only inside a local test browser during development.
 - **Removed by Brian's request (2026-08-24, "that was an accident"):** an uncommitted
