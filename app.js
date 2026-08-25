@@ -1,7 +1,7 @@
 'use strict';
 /* Palabritas — Spanish spelling practice PWA */
 
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.3.0';
 
 /* ---------- helpers ---------- */
 const $ = id => document.getElementById(id);
@@ -374,11 +374,22 @@ async function shareActiveList() {
 }
 
 /* ---------- shared lists from GitHub (lists.json in the repo) ---------- */
+// Fetch from the repo's main branch first — that's what github.com edits by
+// default, so a parent's web edit reaches every phone without a redeploy.
+// Fall back to the copy deployed with the site.
+async function fetchListsJson() {
+  try {
+    const r = await fetch('https://raw.githubusercontent.com/gwallee/Palabritas/main/lists.json', { cache: 'no-cache' });
+    if (r.ok) return await r.json();
+  } catch (e) { /* offline or blocked — try the deployed copy */ }
+  const r2 = await fetch('./lists.json', { cache: 'no-cache' });
+  if (!r2.ok) return null;
+  return r2.json();
+}
+
 async function syncCloudLists() {
   try {
-    const resp = await fetch('./lists.json', { cache: 'no-cache' });
-    if (!resp.ok) return;
-    const cloud = await resp.json();
+    const cloud = await fetchListsJson();
     if (!Array.isArray(cloud)) return;
     let changed = false;
     const addedIds = [];

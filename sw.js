@@ -1,5 +1,5 @@
 /* Palabritas service worker — makes the app work fully offline */
-const CACHE = 'palabritas-v3';
+const CACHE = 'palabritas-v4';
 const ASSETS = [
   './',
   './index.html',
@@ -18,7 +18,12 @@ const ASSETS = [
 ];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  // no-cache: don't let a stale HTTP/CDN copy get baked into a new version's precache
+  e.waitUntil(
+    caches.open(CACHE)
+      .then(c => c.addAll(ASSETS.map(u => new Request(u, { cache: 'no-cache' }))))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener('activate', e => {

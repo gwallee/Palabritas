@@ -73,12 +73,15 @@ backend; word lists and scores live in each device's localStorage.
    box → `absorbSharedName()` lifts the 📚 header into the name field automatically.
 2. **`lists.json` in the repo** (the "universal" store):
    `[{ "id": "2026-08-31", "name": "Week of Aug 31", "words": ["gato", ...] }, ...]`
-   newest first. Every phone fetches it when online (network-first). New ids are imported
-   as `cloud-<id>` and the newest new one becomes the active list. The repo file is the
-   source of truth for cloud lists: repo edits overwrite them on sync (local edits to
-   cloud lists get reverted). Typical workflow: Brian tells Claude the week's words →
-   edit lists.json → deploy (no SW bump needed for lists.json-only changes… but bumping
-   is harmless).
+   newest first. The app fetches it from **raw.githubusercontent.com/…/main/lists.json**
+   first (so a github.com web edit on main reaches phones with NO redeploy — this is the
+   parent self-serve path), falling back to the copy deployed with the site. New ids are
+   imported as `cloud-<id>` and the newest new one becomes the active list. The repo file
+   is the source of truth for cloud lists: repo edits overwrite them on sync (local edits
+   to cloud lists get reverted). Two workflows: Brian edits lists.json on github.com from
+   any device (main branch, i.e. the default — commit and done), or tells Claude the
+   week's words. A malformed JSON edit fails silently (sync just skips it) — if a list
+   doesn't appear on phones, validate the JSON first.
 
 ## Practice loop specifics
 
@@ -119,8 +122,12 @@ git push origin main && git push origin main:gh-pages
 ## State / history
 
 - v1.0.0: core app. v1.1.0: embedded OCR, emoji hints, sentences, share + lists.json sync.
-  v1.2.0 (current): practice-session resume.
+  v1.2.0: practice-session resume. v1.3.0 (current): lists.json fetched from raw main (see
+  above), SW precache uses no-cache requests.
 - `lists.json` is committed empty (`[]`) — no AI/test lists were ever deployed; a "Cloud
   Test List" existed only inside a local test browser during development.
+- **Removed by Brian's request (2026-08-24, "that was an accident"):** an uncommitted
+  theme-bank + Anthropic-API list-generator feature ("✨ Make words for me" / "🤖 Ask AI",
+  settings key field) that a session had added. Do NOT re-add unless Brian explicitly asks.
 - No known open bugs. Ideas floated but not requested: streaks, multiple kid profiles,
   update-available toast, pre-generated premium TTS audio.
