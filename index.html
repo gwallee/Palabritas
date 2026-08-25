@@ -38,7 +38,10 @@
       <h2 id="active-name"></h2>
       <p class="muted" id="active-count"></p>
       <button class="big-btn primary" id="btn-practice">▶&nbsp;&nbsp;¡A practicar!</button>
-      <button class="text-btn" id="btn-edit-active">✏️ Edit words</button>
+      <div class="row-btns">
+        <button class="text-btn" id="btn-edit-active">✏️ Edit words</button>
+        <button class="text-btn" id="btn-share-active">📤 Share list</button>
+      </div>
     </div>
 
     <div class="card empty-card hidden" id="empty-card">
@@ -61,10 +64,15 @@
     <label class="field-label" for="list-name">List name</label>
     <input id="list-name" class="text-field" type="text" autocomplete="off">
 
+    <button class="big-btn secondary slim" id="btn-scan">📷 Scan a photo of the list</button>
+    <input type="file" id="scan-file" accept="image/*" hidden>
+    <div class="scan-progress hidden" id="scan-progress">
+      <div class="muted small" id="scan-status">Starting…</div>
+      <div class="progress-bar"><div class="progress-fill" id="scan-fill"></div></div>
+    </div>
     <div class="scan-hint">
-      📷 <b>To scan a printed list:</b> tap the box below, then choose
-      <b>Scan&nbsp;Text</b> (the <span class="scan-icon">⌸</span> button on the keyboard)
-      and point the camera at the sheet. Or just type the words.
+      💡 Snap the printed sheet straight-on in good light — then check the words it
+      found and remove any strays. You can always type or paste words too.
     </div>
 
     <label class="field-label" for="words-input">Words <span class="muted">(one per line)</span></label>
@@ -87,9 +95,11 @@
       </div>
     </header>
 
+    <div class="word-pic hidden" id="word-pic" aria-hidden="true"></div>
     <div class="speak-row">
       <button class="speak-btn" id="btn-say" aria-label="Say the word">🔊</button>
       <button class="speak-btn small" id="btn-slow" aria-label="Say it slowly">🐢</button>
+      <button class="speak-btn small" id="btn-sentence" aria-label="Hear it in a sentence">💬</button>
       <button class="speak-btn small hidden" id="btn-spellout" aria-label="Spell it out">🔤</button>
     </div>
 
@@ -185,6 +195,7 @@
 </div>
 
 <canvas id="confetti"></canvas>
+<script src="./vendor/tesseract.min.js"></script>
 <script src="./app.js"></script>
 </body>
 </html>

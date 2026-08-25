@@ -77,6 +77,7 @@ body {
   padding: 8px 12px; cursor: pointer;
 }
 .text-btn.danger { color: var(--bad); }
+.row-btns { display: flex; justify-content: center; gap: 4px; }
 
 .icon-btn {
   background: var(--card); border: none;
@@ -159,7 +160,15 @@ textarea { resize: vertical; min-height: 150px; }
 .progress-fill { height: 100%; width: 0%; border-radius: 999px;
   background: linear-gradient(90deg, var(--sun), var(--coral)); transition: width .4s ease; }
 
-.speak-row { display: flex; justify-content: center; align-items: center; gap: 16px; margin: 18px 0 6px; }
+.word-pic {
+  text-align: center; font-size: 58px; line-height: 1;
+  margin: 14px 0 0; min-height: 62px;
+  filter: drop-shadow(0 3px 4px rgba(70,50,30,.15));
+  animation: pop .35s ease;
+}
+.speak-row { display: flex; justify-content: center; align-items: center; gap: 14px; margin: 18px 0 6px; }
+.scan-progress { margin: 12px 0 2px; }
+.scan-progress .progress-bar { margin-top: 6px; }
 .speak-btn {
   width: 96px; height: 96px; border-radius: 32px; border: none;
   font-size: 44px; cursor: pointer;

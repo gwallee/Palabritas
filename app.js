@@ -132,6 +132,7 @@ function chime(good) {
 function show(name) {
   ['home', 'edit', 'practice', 'done', 'settings'].forEach(v =>
     $('view-' + v).classList.toggle('hidden', v !== name));
+  if (name !== 'edit') releaseOcr();   // free OCR memory when leaving the editor
   window.scrollTo(0, 0);
 }
 
@@ -192,18 +193,100 @@ const defaultListName = () =>
 function parseWords(text) {
   const out = [], seen = new Set();
   text.split(/[\n,;•·|]+/).forEach(raw => {
+    if (/^\s*📚/.test(raw)) return;   // header line from a shared list
     const w = raw
       .replace(/^\s*\d+\s*[.):\-]*\s*/, '')            // leading "1." "2)" numbering
       .replace(/^[\s\-–—*✓✔☐□]+/, '')                  // leading bullets/dashes
       .replace(/[.,;:!?¡¿"“”'']+\s*$/g, '')            // trailing punctuation
       .trim().replace(/\s+/g, ' ');
     if (!w) return;
+    // OCR/typing noise filters: needs at least 2 letters, no digits, sane length
+    if (w.replace(/[^\p{L}]/gu, '').length < 2) return;
+    if (/\d/.test(w)) return;
+    if (w.length > 40) return;
     const key = canon(w);
     if (seen.has(key)) return;
     seen.add(key);
     out.push(w);
   });
   return out;
+}
+
+/* ---------- photo scan (on-device OCR) ---------- */
+let ocrWorker = null;
+
+async function getOcrWorker() {
+  if (ocrWorker) return ocrWorker;
+  const base = new URL('.', location.href).href;
+  ocrWorker = await Tesseract.createWorker('spa', 1, {
+    workerPath: base + 'vendor/worker.min.js',
+    corePath: base + 'vendor/core',
+    langPath: base + 'vendor/lang',
+    gzip: true,
+    workerBlobURL: false,
+    logger: m => {
+      if (m.status === 'recognizing text') setScanProgress('Reading the words…', 0.2 + m.progress * 0.8);
+    },
+  });
+  return ocrWorker;
+}
+
+function releaseOcr() {
+  if (ocrWorker) {
+    try { ocrWorker.terminate(); } catch (e) {}
+    ocrWorker = null;
+  }
+  $('scan-progress').classList.add('hidden');
+}
+
+function setScanProgress(text, frac) {
+  $('scan-progress').classList.remove('hidden');
+  $('scan-status').textContent = text;
+  $('scan-fill').style.width = Math.round(Math.max(0, Math.min(1, frac || 0)) * 100) + '%';
+}
+
+// Draw the photo onto a canvas (downscaled) so EXIF rotation is applied and OCR is fast.
+async function photoToCanvas(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    const scale = Math.min(1, 1700 / Math.max(img.naturalWidth, img.naturalHeight));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+    canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+    return canvas;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+async function scanPhoto(file) {
+  const btn = $('btn-scan');
+  btn.disabled = true;
+  try {
+    setScanProgress('Warming up the scanner…', 0.05);
+    const canvas = await photoToCanvas(file);
+    const worker = await getOcrWorker();
+    setScanProgress('Reading the words…', 0.2);
+    const { data } = await worker.recognize(canvas);
+    const found = parseWords(data.text || '');
+    if (!found.length) {
+      setScanProgress('No words found — try a closer, straight-on photo in good light.', 0);
+    } else {
+      const existing = $('words-input').value.trim();
+      $('words-input').value = (existing ? existing + '\n' : '') + found.join('\n');
+      renderChips();
+      setScanProgress(`Found ${found.length} word${found.length === 1 ? '' : 's'} — check them and remove any strays.`, 1);
+    }
+  } catch (err) {
+    setScanProgress("Scanning didn't work — you can still type or paste the words.", 0);
+    releaseOcr();
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 function openEdit(listId) {
@@ -213,11 +296,23 @@ function openEdit(listId) {
   $('list-name').value = list ? list.name : defaultListName();
   $('words-input').value = list ? list.words.join('\n') : '';
   $('btn-delete-list').classList.toggle('hidden', !list);
+  $('scan-progress').classList.add('hidden');
   renderChips();
   show('edit');
 }
 
+// If a shared list was pasted in, lift its "📚 name" header into the name field.
+function absorbSharedName() {
+  const ta = $('words-input');
+  const m = ta.value.match(/^\s*📚\s*(.+)\s*$/m);
+  if (!m) return;
+  const nameField = $('list-name');
+  if (!nameField.value.trim() || /^Week of /.test(nameField.value)) nameField.value = m[1].trim();
+  ta.value = ta.value.replace(/^\s*📚.*$/m, '').replace(/^\n+/, '');
+}
+
 function renderChips() {
+  absorbSharedName();
   const words = parseWords($('words-input').value);
   $('chips-label').textContent = words.length
     ? `${words.length} word${words.length === 1 ? '' : 's'} — tap ✕ to remove:` : '';
@@ -256,12 +351,149 @@ function saveList() {
   save(); renderHome(); show('home');
 }
 
+async function shareActiveList() {
+  const list = activeList();
+  if (!list) return;
+  const text = `📚 ${list.name}\n${list.words.join('\n')}\n\nOpen Palabritas → New word list → paste this in!\nhttps://gwallee.github.io/Palabritas/`;
+  if (navigator.share) {
+    try { await navigator.share({ text }); return; } catch (e) { /* user cancelled */ return; }
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    alert('List copied! Paste it into a message.');
+  } catch (e) {
+    alert('Could not share on this device.');
+  }
+}
+
+/* ---------- shared lists from GitHub (lists.json in the repo) ---------- */
+async function syncCloudLists() {
+  try {
+    const resp = await fetch('./lists.json', { cache: 'no-cache' });
+    if (!resp.ok) return;
+    const cloud = await resp.json();
+    if (!Array.isArray(cloud)) return;
+    let changed = false;
+    const addedIds = [];
+    cloud.forEach(cl => {
+      if (!cl || !cl.id || !Array.isArray(cl.words) || !cl.words.length) return;
+      const id = 'cloud-' + String(cl.id);
+      const name = String(cl.name || cl.id);
+      const words = cl.words.map(String);
+      const existing = data.lists.find(l => l.id === id);
+      if (existing) {   // the repo file is the source of truth for cloud lists
+        if (existing.name !== name || JSON.stringify(existing.words) !== JSON.stringify(words)) {
+          existing.name = name;
+          existing.words = words;
+          changed = true;
+        }
+      } else {
+        data.lists.unshift({ id, name, words, createdAt: Date.now() });
+        addedIds.push(id);
+        changed = true;
+      }
+    });
+    if (addedIds.length) data.activeListId = addedIds[0];  // newest-first in lists.json
+    if (changed) { save(); renderHome(); }
+  } catch (e) { /* offline — no problem */ }
+}
+
 function deleteList() {
   if (!editingId || !confirm('Delete this list?')) return;
   data.lists = data.lists.filter(l => l.id !== editingId);
   if (data.activeListId === editingId) data.activeListId = data.lists.length ? data.lists[0].id : null;
   save(); renderHome(); show('home');
 }
+
+/* ---------- word pictures (emoji hints) ---------- */
+const WORD_EMOJI = {
+  // animals
+  gato:'🐱', perro:'🐶', pez:'🐟', pescado:'🐟', pájaro:'🐦', ave:'🐦', caballo:'🐴', vaca:'🐮',
+  cerdo:'🐷', puerco:'🐷', pollo:'🐔', gallina:'🐔', gallo:'🐓', pato:'🦆', oso:'🐻', león:'🦁',
+  tigre:'🐯', mono:'🐵', changuito:'🐵', chango:'🐵', elefante:'🐘', jirafa:'🦒', ratón:'🐭', rata:'🐀',
+  conejo:'🐰', tortuga:'🐢', serpiente:'🐍', víbora:'🐍', culebra:'🐍', rana:'🐸', sapo:'🐸',
+  abeja:'🐝', mariposa:'🦋', araña:'🕷️', hormiga:'🐜', mosca:'🪰', grillo:'🦗', catarina:'🐞',
+  caracol:'🐌', delfín:'🐬', ballena:'🐋', tiburón:'🦈', pulpo:'🐙', cangrejo:'🦀', camarón:'🦐',
+  búho:'🦉', lechuza:'🦉', lobo:'🐺', zorro:'🦊', venado:'🦌', ardilla:'🐿️', murciélago:'🦇',
+  pingüino:'🐧', águila:'🦅', loro:'🦜', perico:'🦜', gusano:'🪱', dinosaurio:'🦖', unicornio:'🦄',
+  dragón:'🐉', camello:'🐫', burro:'🫏', oveja:'🐑', borrego:'🐑', cabra:'🐐', chivo:'🐐',
+  koala:'🐨', canguro:'🦘', hipopótamo:'🦛', rinoceronte:'🦏', cocodrilo:'🐊', lagarto:'🦎',
+  lagartija:'🦎', iguana:'🦎', flamenco:'🦩', cisne:'🦢', pavo:'🦃', foca:'🦭', pantera:'🐆',
+  // food
+  manzana:'🍎', plátano:'🍌', banana:'🍌', naranja:'🍊', limón:'🍋', uva:'🍇', fresa:'🍓',
+  sandía:'🍉', melón:'🍈', piña:'🍍', mango:'🥭', pera:'🍐', durazno:'🍑', cereza:'🍒', coco:'🥥',
+  aguacate:'🥑', tomate:'🍅', jitomate:'🍅', zanahoria:'🥕', maíz:'🌽', elote:'🌽', papa:'🥔',
+  pan:'🍞', queso:'🧀', huevo:'🥚', leche:'🥛', agua:'💧', jugo:'🧃', café:'☕', té:'🍵',
+  taco:'🌮', pizza:'🍕', hamburguesa:'🍔', sopa:'🍲', arroz:'🍚', pastel:'🎂', galleta:'🍪',
+  dulce:'🍬', caramelo:'🍬', chocolate:'🍫', helado:'🍨', paleta:'🍭', miel:'🍯', sal:'🧂',
+  frijol:'🫘', pepino:'🥒', lechuga:'🥬', brócoli:'🥦', cebolla:'🧅', ajo:'🧄', chile:'🌶️',
+  hongo:'🍄', champiñón:'🍄', mantequilla:'🧈', tortilla:'🫓', espagueti:'🍝', cuchara:'🥄',
+  sándwich:'🥪', cacahuate:'🥜', calabaza:'🎃', comida:'🍽️',
+  // school & objects
+  libro:'📖', lápiz:'✏️', pluma:'🖊️', crayón:'🖍️', tijeras:'✂️', mochila:'🎒', escuela:'🏫',
+  maestro:'🧑‍🏫', maestra:'👩‍🏫', papel:'📄', cuaderno:'📓', regla:'📏', computadora:'💻',
+  teléfono:'📱', televisión:'📺', reloj:'⏰', silla:'🪑', cama:'🛏️', puerta:'🚪', ventana:'🪟',
+  llave:'🔑', casa:'🏠', carro:'🚗', coche:'🚗', camión:'🚚', autobús:'🚌', tren:'🚂', avión:'✈️',
+  barco:'⛵', bicicleta:'🚲', cohete:'🚀', globo:'🎈', pelota:'⚽', balón:'⚽', juguete:'🧸',
+  muñeca:'🪆', 'oso de peluche':'🧸', regalo:'🎁', dinero:'💰', moneda:'🪙', anillo:'💍',
+  corona:'👑', espada:'🗡️', escudo:'🛡️', campana:'🔔', tambor:'🥁', guitarra:'🎸', piano:'🎹',
+  violín:'🎻', trompeta:'🎺', música:'🎵', canción:'🎵', foto:'📷', cámara:'📷', lámpara:'💡',
+  foco:'💡', vela:'🕯️', fuego:'🔥', escoba:'🧹', jabón:'🧼', cepillo:'🪥', sombrero:'🎩',
+  zapato:'👟', calcetín:'🧦', camisa:'👕', playera:'👕', pantalón:'👖', vestido:'👗', falda:'👗',
+  abrigo:'🧥', guante:'🧤', bufanda:'🧣', gorra:'🧢', lentes:'👓', paraguas:'☂️', bota:'👢',
+  corbata:'👔', tesoro:'💎', mapa:'🗺️', bandera:'🚩', carta:'✉️', sobre:'✉️', basura:'🗑️',
+  martillo:'🔨', cubeta:'🪣', imán:'🧲',
+  // nature
+  sol:'☀️', luna:'🌙', estrella:'⭐', nube:'☁️', lluvia:'🌧️', nieve:'❄️', rayo:'⚡', trueno:'⚡',
+  arcoíris:'🌈', tornado:'🌪️', viento:'🌬️', montaña:'⛰️', río:'🏞️', mar:'🌊', océano:'🌊',
+  ola:'🌊', playa:'🏖️', isla:'🏝️', árbol:'🌳', flor:'🌸', rosa:'🌹', girasol:'🌻', hoja:'🍃',
+  planta:'🪴', semilla:'🌱', cactus:'🌵', bosque:'🌲', tierra:'🌎', mundo:'🌎', planeta:'🪐',
+  volcán:'🌋', piedra:'🪨', roca:'🪨', hielo:'🧊', desierto:'🏜️', primavera:'🌷', verano:'☀️',
+  otoño:'🍂', invierno:'⛄',
+  // people & body
+  ojo:'👁️', boca:'👄', nariz:'👃', oreja:'👂', mano:'✋', pie:'🦶', diente:'🦷', corazón:'❤️',
+  cerebro:'🧠', hueso:'🦴', bebé:'👶', niño:'👦', niña:'👧', hombre:'👨', mujer:'👩',
+  abuelo:'👴', abuela:'👵', familia:'👨‍👩‍👧‍👦', amigo:'🧑‍🤝‍🧑', amiga:'🧑‍🤝‍🧑', rey:'🤴',
+  reina:'👸', princesa:'👸', príncipe:'🤴', doctor:'🧑‍⚕️', doctora:'👩‍⚕️', policía:'👮',
+  bombero:'🧑‍🚒', astronauta:'🧑‍🚀', pirata:'🏴‍☠️', payaso:'🤡', fantasma:'👻', monstruo:'👹',
+  robot:'🤖', ángel:'😇', bruja:'🧙', hada:'🧚', sirena:'🧜',
+  // actions & feelings
+  feliz:'😊', triste:'😢', enojado:'😠', enojada:'😠', cansado:'😴', cansada:'😴', dormir:'😴',
+  correr:'🏃', caminar:'🚶', nadar:'🏊', bailar:'💃', cantar:'🎤', leer:'📖', escribir:'✍️',
+  pintar:'🎨', dibujar:'🖍️', cocinar:'🍳', amor:'❤️', beso:'💋', abrazo:'🤗', risa:'😂',
+  llorar:'😭', hola:'👋', gracias:'🙏', silencio:'🤫',
+  // colors & misc
+  rojo:'🔴', azul:'🔵', verde:'🟢', amarillo:'🟡', morado:'🟣', negro:'⚫', blanco:'⚪',
+  cumpleaños:'🎂', fiesta:'🎉', navidad:'🎄', fútbol:'⚽', béisbol:'⚾', básquetbol:'🏀',
+  baloncesto:'🏀', tenis:'🎾', magia:'✨', sueño:'💤', noche:'🌃', día:'🌅', mañana:'🌅',
+};
+
+let EMOJI_INDEX = null;
+function emojiFor(word) {
+  if (!EMOJI_INDEX) {
+    EMOJI_INDEX = {};
+    for (const [k, v] of Object.entries(WORD_EMOJI)) EMOJI_INDEX[stripVowelAccents(k)] = v;
+  }
+  let w = canon(word).replace(/^(el|la|los|las|un|una|unos|unas)\s+/, '');
+  const candidates = [w];
+  if (w.endsWith('es')) candidates.push(w.slice(0, -2));
+  if (w.endsWith('s')) candidates.push(w.slice(0, -1));
+  for (const c of candidates) {
+    const hit = EMOJI_INDEX[stripVowelAccents(c)];
+    if (hit) return hit;
+  }
+  return null;
+}
+
+/* ---------- sentences (word-mention frames: always grammatical) ---------- */
+const SENTENCE_FRAMES = [
+  'La palabra de hoy es: {w}.',
+  'Mi palabra favorita es: {w}.',
+  'Escucha bien: {w}.',
+  '¿Puedes escribir la palabra {w}?',
+  'En la escuela aprendimos la palabra {w}.',
+];
+const speakSentence = word => speak(pick(SENTENCE_FRAMES).replace('{w}', word), 0.95);
 
 /* ---------- practice ---------- */
 const PRAISE = ['¡Muy bien!', '¡Excelente!', '¡Perfecto!', '¡Genial!', '¡Fantástico!', '¡Súper!', '¡Increíble!'];
@@ -305,6 +537,9 @@ function nextWord() {
   if (!session.results[session.current]) session.results[session.current] = { misses: 0, firstTry: null };
   updateProgress();
   $('prompt-msg').textContent = 'Listen… then spell it! 👂';
+  const pic = emojiFor(session.current);
+  $('word-pic').textContent = pic || '';
+  $('word-pic').classList.toggle('hidden', !pic);
   speak(session.current);
   $('answer').focus();
 }
@@ -532,6 +767,20 @@ function init() {
   $('words-input').addEventListener('input', renderChips);
   $('btn-save-list').addEventListener('click', saveList);
   $('btn-delete-list').addEventListener('click', deleteList);
+  $('btn-share-active').addEventListener('click', shareActiveList);
+  $('btn-scan').addEventListener('click', () => {
+    if (typeof Tesseract === 'undefined') {
+      alert('The scanner needs its one-time download — open the app once with internet, then try again.');
+      return;
+    }
+    $('scan-file').click();
+  });
+  $('scan-file').addEventListener('change', e => {
+    const f = e.target.files && e.target.files[0];
+    if (f) scanPhoto(f);
+    e.target.value = '';
+  });
+  $('btn-sentence').addEventListener('click', () => session && session.current && speakSentence(session.current));
 
   $('btn-quit').addEventListener('click', () => {
     if (hasSpeech) try { speechSynthesis.cancel(); } catch (e) {}
@@ -578,6 +827,7 @@ function init() {
 }
 
 init();
+syncCloudLists();
 
 /* ---------- offline support ---------- */
 if ('serviceWorker' in navigator) {

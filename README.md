@@ -8,9 +8,17 @@ Everything is stored **on the device** (localStorage) — no accounts, no server
 
 ## How it works
 
-- **Add the week's words:** tap *New word list*, tap the words box, and use the iPhone
-  keyboard's **Scan Text** button to point the camera at the printed list (or just type).
-  Review the parsed word chips, remove any strays, save.
+- **Add the week's words:** tap *New word list* → **📷 Scan a photo of the list** (embedded
+  Tesseract OCR, Spanish-trained, runs on-device and offline). Review the parsed word chips,
+  remove any strays, save. Typing/pasting works too, and iOS's own keyboard "Scan Text" is a
+  bonus path where available.
+- **Two phones, one list:** on the home screen tap **📤 Share list** and text it to the other
+  phone — there, *New word list* → paste. Or add lists to `lists.json` in this repo
+  (`[{ "id": "2026-08-31", "name": "Week of Aug 31", "words": ["gato", "..."] }]`, newest first):
+  every phone pulls new entries automatically when online, and the newest becomes active.
+  Repo lists are overwritten by the repo on sync — edit them in the repo, not on the phone.
+- **Storage note (iOS):** Safari and the installed home-screen app have *separate* storage.
+  Lists live in whichever one you created them in — use the home-screen app for everything.
 - **Practice:** words come in random order. The app speaks each word (repeat 🔊 / slow 🐢).
   She types it — wrong answers show which letters were right (green), which have an accent
   problem (yellow), and which are wrong (red), without revealing the answer. After the
