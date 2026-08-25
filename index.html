@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#FFF7EE">
+<meta name="color-scheme" content="light">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Palabritas">
+<title>Palabritas</title>
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="apple-touch-icon" href="./apple-touch-icon.png">
+<link rel="icon" href="./icon-192.png">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- ============ HOME ============ -->
+  <section id="view-home" class="view">
+    <header class="home-head">
+      <button class="icon-btn corner-btn" id="btn-settings" aria-label="Settings">⚙️</button>
+      <div class="logo">🦜</div>
+      <h1>Palabritas</h1>
+      <p class="tagline">Spanish spelling practice</p>
+    </header>
+
+    <div id="voice-banner" class="banner hidden">
+      <b>No Spanish voice found on this device.</b>
+      On iPhone: Settings → Accessibility → Spoken&nbsp;Content → Voices → Spanish → download one (Paulina&nbsp;Enhanced sounds great).
+      <button class="text-btn" id="btn-voice-banner-close">Got it</button>
+    </div>
+
+    <div class="card active-card hidden" id="active-card">
+      <div class="card-label">THIS WEEK</div>
+      <h2 id="active-name"></h2>
+      <p class="muted" id="active-count"></p>
+      <button class="big-btn primary" id="btn-practice">▶&nbsp;&nbsp;¡A practicar!</button>
+      <button class="text-btn" id="btn-edit-active">✏️ Edit words</button>
+    </div>
+
+    <div class="card empty-card hidden" id="empty-card">
+      <div class="empty-emoji">📚</div>
+      <p>No words yet!<br>Add this week's spelling list to get started.</p>
+    </div>
+
+    <button class="big-btn secondary" id="btn-new-list">＋ New word list</button>
+
+    <div id="past-lists"></div>
+  </section>
+
+  <!-- ============ EDIT / NEW LIST ============ -->
+  <section id="view-edit" class="view hidden">
+    <header class="sub-head">
+      <button class="icon-btn" id="btn-edit-back" aria-label="Back">←</button>
+      <h2 id="edit-title">New word list</h2>
+    </header>
+
+    <label class="field-label" for="list-name">List name</label>
+    <input id="list-name" class="text-field" type="text" autocomplete="off">
+
+    <div class="scan-hint">
+      📷 <b>To scan a printed list:</b> tap the box below, then choose
+      <b>Scan&nbsp;Text</b> (the <span class="scan-icon">⌸</span> button on the keyboard)
+      and point the camera at the sheet. Or just type the words.
+    </div>
+
+    <label class="field-label" for="words-input">Words <span class="muted">(one per line)</span></label>
+    <textarea id="words-input" rows="8" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="gato&#10;perro&#10;mañana&#10;árbol"></textarea>
+
+    <div class="chips-label muted" id="chips-label"></div>
+    <div class="chips" id="chips"></div>
+
+    <button class="big-btn primary" id="btn-save-list">Save list ✓</button>
+    <button class="text-btn danger hidden" id="btn-delete-list">🗑 Delete this list</button>
+  </section>
+
+  <!-- ============ PRACTICE ============ -->
+  <section id="view-practice" class="view hidden">
+    <header class="sub-head">
+      <button class="icon-btn" id="btn-quit" aria-label="Quit">✕</button>
+      <div class="progress">
+        <div class="progress-text" id="progress-text"></div>
+        <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+      </div>
+    </header>
+
+    <div class="speak-row">
+      <button class="speak-btn" id="btn-say" aria-label="Say the word">🔊</button>
+      <button class="speak-btn small" id="btn-slow" aria-label="Say it slowly">🐢</button>
+      <button class="speak-btn small hidden" id="btn-spellout" aria-label="Spell it out">🔤</button>
+    </div>
+
+    <p class="prompt-msg" id="prompt-msg">Listen… then spell it! 👂</p>
+
+    <div id="reveal-box" class="reveal-box hidden">
+      <div class="card-label">THE WORD IS</div>
+      <div class="reveal-word" id="reveal-word"></div>
+      <div class="muted">Now type it to keep going 💪</div>
+    </div>
+
+    <div class="attempts" id="attempts"></div>
+
+    <div class="answer-area" id="answer-area">
+      <input id="answer" class="answer-input" type="text"
+             autocomplete="off" autocorrect="off" autocapitalize="none"
+             spellcheck="false" enterkeyhint="go" aria-label="Type the word">
+      <div class="accent-row" id="accent-row">
+        <button class="accent-btn">á</button><button class="accent-btn">é</button><button class="accent-btn">í</button><button class="accent-btn">ó</button><button class="accent-btn">ú</button><button class="accent-btn">ü</button><button class="accent-btn">ñ</button>
+      </div>
+      <button class="big-btn primary" id="btn-check">Check ✓</button>
+    </div>
+
+    <div class="result-flash hidden" id="result-flash"></div>
+  </section>
+
+  <!-- ============ DONE ============ -->
+  <section id="view-done" class="view hidden">
+    <div class="done-inner">
+      <div class="done-emoji">🎉</div>
+      <h2 id="done-title">¡Lo lograste!</h2>
+      <div class="done-stars" id="done-stars"></div>
+      <p class="done-summary" id="done-summary"></p>
+      <div class="tricky-box hidden" id="tricky-box">
+        <h3>Practice these again 💪</h3>
+        <div id="tricky-list"></div>
+      </div>
+      <button class="big-btn primary" id="btn-again">Practice again 🔁</button>
+      <button class="big-btn secondary" id="btn-done-home">Home 🏠</button>
+    </div>
+  </section>
+
+  <!-- ============ SETTINGS ============ -->
+  <section id="view-settings" class="view hidden">
+    <header class="sub-head">
+      <button class="icon-btn" id="btn-settings-back" aria-label="Back">←</button>
+      <h2>Settings</h2>
+    </header>
+
+    <div class="card">
+      <label class="field-label" for="voice-select">Spanish voice</label>
+      <select id="voice-select" class="text-field"></select>
+      <button class="big-btn secondary slim" id="btn-test-voice">🔊 Test voice</button>
+      <p class="muted small">Tip: for the most natural voice on iPhone, download an
+      <b>Enhanced</b> Spanish voice: Settings → Accessibility → Spoken&nbsp;Content →
+      Voices → Spanish (e.g. Paulina&nbsp;Enhanced), then pick it here.</p>
+    </div>
+
+    <div class="card">
+      <label class="field-label" for="rate-slider">Speaking speed</label>
+      <input type="range" id="rate-slider" min="0.5" max="1.2" step="0.05">
+      <div class="muted small" id="rate-value"></div>
+    </div>
+
+    <div class="card">
+      <label class="toggle-row">
+        <span><b>Accents must be exact</b><br><span class="muted small">Off: "arbol" counts for "árbol", but she'll still see the correct accents. The letter ñ always has to be right.</span></span>
+        <input type="checkbox" id="strict-toggle" class="toggle">
+      </label>
+    </div>
+
+    <div class="card">
+      <label class="field-label" for="retries-select">Extra tries after a miss</label>
+      <select id="retries-select" class="text-field">
+        <option value="1">1 extra try</option>
+        <option value="2">2 extra tries</option>
+        <option value="3">3 extra tries</option>
+      </select>
+    </div>
+
+    <div class="card">
+      <div class="field-label">iPhone setup</div>
+      <p class="muted small">
+        <b>Install:</b> in Safari tap Share <span class="scan-icon">⬆︎</span> → <b>Add to Home Screen</b>.
+        After that it works without internet.<br><br>
+        <b>Scan words:</b> when adding a list, tap the words box and choose <b>Scan Text</b> on the keyboard.
+      </p>
+    </div>
+
+    <p class="muted small center" id="version-line"></p>
+  </section>
+
+</div>
+
+<canvas id="confetti"></canvas>
+<script src="./app.js"></script>
+</body>
+</html>
