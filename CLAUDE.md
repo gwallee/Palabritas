@@ -84,6 +84,15 @@ backend; word lists and scores live in each device's localStorage.
      dropped (it was just promoted) so it doesn't appear twice.
    - `lists.json` — legacy single feed, newest first, fetched from raw main with the
      deployed copy as fallback. Still fine for hand edits / Claude-committed lists.
+   - **Per-word enrichment** (either store): optional `"extras"` object keyed by the
+     lowercase word: `{ "camuflaje": { "emoji": "🦎", "sentence": "Con su camuflaje, el
+     camaleón se esconde…" } }`. The practice screen prefers the extra emoji over the
+     built-in WORD_EMOJI map, and 💬 speaks the extra sentence (a real usage sentence
+     that TEACHES the meaning — Brian explicitly rejected filler frames like "mi palabra
+     favorita es X") instead of a generic frame. Workflow: after Brian ☁️-saves a list,
+     he asks Claude to "enrich this week's list" → Claude writes kid-level Latin American
+     Spanish sentences + picks emoji per word and commits the updated lists/ file.
+     Enrichment arriving later does NOT clear a paused session.
    New ids are imported as `cloud-<id>` and the newest new one becomes the active list.
    The repo is the source of truth for cloud lists: repo edits overwrite them on sync.
    A malformed JSON file fails silently (sync skips it) — if a list doesn't appear on
@@ -129,8 +138,9 @@ git push origin main && git push origin main:gh-pages
 
 - v1.0.0: core app. v1.1.0: embedded OCR, emoji hints, sentences, share + lists.json sync.
   v1.2.0: practice-session resume. v1.3.0: lists.json fetched from raw main, SW precache
-  uses no-cache requests. v1.4.0 (current): ☁️ Save to cloud (token-free, prefilled GitHub
-  commit page) + per-file `lists/` store with sha-based sync.
+  uses no-cache requests. v1.4.0: ☁️ Save to cloud (token-free, prefilled GitHub commit
+  page) + per-file `lists/` store with sha-based sync. v1.5.0 (current): per-word extras
+  (emoji + teaching sentence) on cloud lists; Claude enriches each week's list on request.
 - `lists.json` is committed empty (`[]`) — no AI/test lists were ever deployed; a "Cloud
   Test List" existed only inside a local test browser during development.
 - **Removed by Brian's request (2026-08-24, "that was an accident"):** an uncommitted

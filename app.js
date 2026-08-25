@@ -1,7 +1,7 @@
 'use strict';
 /* Palabritas — Spanish spelling practice PWA */
 
-const APP_VERSION = '1.4.0';
+const APP_VERSION = '1.5.0';
 
 /* ---------- helpers ---------- */
 const $ = id => document.getElementById(id);
@@ -436,7 +436,7 @@ async function fetchCloudFiles() {
         const fr = await fetch(f.download_url, { cache: 'no-cache' });
         if (!fr.ok) continue;
         const j = await fr.json();
-        entries.push({ id, name: j.name, words: j.words, sha: f.sha });
+        entries.push({ id, name: j.name, words: j.words, extras: j.extras, sha: f.sha });
       } catch (e) { /* skip malformed/unreachable file */ }
     }
   } catch (e) { /* offline — no problem */ }
@@ -471,6 +471,7 @@ async function syncCloudLists() {
       const id = 'cloud-' + String(cl.id);
       const name = String(cl.name || cl.id);
       const words = cl.words.map(String);
+      const extras = (cl.extras && typeof cl.extras === 'object') ? cl.extras : undefined;
       const existing = data.lists.find(l => l.id === id);
       if (existing) {   // the repo is the source of truth for cloud lists
         if (existing.name !== name || JSON.stringify(existing.words) !== JSON.stringify(words)) {
@@ -479,9 +480,13 @@ async function syncCloudLists() {
           if (data.paused && data.paused.listId === id) data.paused = null;
           changed = true;
         }
+        if (JSON.stringify(existing.extras || null) !== JSON.stringify(extras || null)) {
+          existing.extras = extras;   // enrichment arriving later shouldn't clear a pause
+          changed = true;
+        }
         if (cl.sha && existing.cloudSha !== cl.sha) { existing.cloudSha = cl.sha; changed = true; }
       } else {
-        data.lists.unshift({ id, name, words, createdAt: Date.now(), cloudSha: cl.sha });
+        data.lists.unshift({ id, name, words, extras, createdAt: Date.now(), cloudSha: cl.sha });
         dropPromotedLocal(id, name, words);
         addedIds.push(id);
         changed = true;
@@ -580,15 +585,28 @@ function emojiFor(word) {
   return null;
 }
 
-/* ---------- sentences (word-mention frames: always grammatical) ---------- */
+/* ---------- sentences ---------- */
+// Enriched cloud lists carry a real usage sentence per word (extras). The
+// generic frames below are only the fallback for lists without extras.
 const SENTENCE_FRAMES = [
-  'La palabra de hoy es: {w}.',
-  'Mi palabra favorita es: {w}.',
   'Escucha bien: {w}.',
-  '¿Puedes escribir la palabra {w}?',
+  'La palabra de hoy es: {w}.',
   'En la escuela aprendimos la palabra {w}.',
 ];
-const speakSentence = word => speak(pick(SENTENCE_FRAMES).replace('{w}', word), 0.95);
+
+// Per-word enrichment ({ emoji, sentence }) from the practice list, if any.
+function wordExtra(word) {
+  if (!session) return null;
+  const list = data.lists.find(l => l.id === session.listId);
+  const extras = list && list.extras;
+  return (extras && extras[canon(word)]) || null;
+}
+
+function speakSentence(word) {
+  const ex = wordExtra(word);
+  if (ex && ex.sentence) { speak(ex.sentence, 0.92); return; }
+  speak(pick(SENTENCE_FRAMES).replace('{w}', word), 0.95);
+}
 
 /* ---------- practice ---------- */
 const PRAISE = ['¡Muy bien!', '¡Excelente!', '¡Perfecto!', '¡Genial!', '¡Fantástico!', '¡Súper!', '¡Increíble!'];
@@ -673,7 +691,8 @@ function nextWord() {
   if (!session.results[session.current]) session.results[session.current] = { misses: 0, firstTry: null };
   updateProgress();
   $('prompt-msg').textContent = 'Listen… then spell it! 👂';
-  const pic = emojiFor(session.current);
+  const ex = wordExtra(session.current);
+  const pic = (ex && ex.emoji) || emojiFor(session.current);
   $('word-pic').textContent = pic || '';
   $('word-pic').classList.toggle('hidden', !pic);
   saveSession();

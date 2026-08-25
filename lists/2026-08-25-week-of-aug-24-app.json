@@ -12,5 +12,17 @@
     "piel",
     "depredador",
     "muy"
-  ]
+  ],
+  "extras": {
+    "adaptación": { "emoji": "🐠", "sentence": "Las aletas del pez son una adaptación que le ayuda a nadar rápido." },
+    "camuflaje": { "emoji": "🦎", "sentence": "Con su camuflaje, el camaleón se esconde entre las hojas verdes." },
+    "insecto": { "emoji": "🐜", "sentence": "La hormiga es un insecto muy pequeño con seis patas." },
+    "animales": { "emoji": "🐾", "sentence": "El león, el oso y el conejo son animales." },
+    "confunde": { "emoji": "😵‍💫", "sentence": "El color de la mariposa confunde a los pájaros que quieren atraparla." },
+    "sobrevivir": { "emoji": "🌵", "sentence": "El cactus puede sobrevivir en el desierto sin mucha agua." },
+    "presas": { "emoji": "🐭", "sentence": "Los ratones son las presas favoritas de los búhos." },
+    "piel": { "emoji": "🐘", "sentence": "La piel del elefante es gruesa y arrugada." },
+    "depredador": { "emoji": "🦈", "sentence": "El tiburón es un depredador que caza peces para comer." },
+    "muy": { "sentence": "El chile es muy picante y el helado es muy frío." }
+  }
 }
