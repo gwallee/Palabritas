@@ -19,6 +19,7 @@ const shuffle = arr => {
 const DEFAULTS = {
   lists: [],
   activeListId: null,
+  paused: null,   // snapshot of an unfinished practice session (same device)
   settings: { voiceURI: '', rate: 0.95, strict: false, retries: 2 },
 };
 
@@ -146,6 +147,11 @@ function renderHome() {
     let meta = list.words.length + ' words';
     if (list.lastResult) meta += ` · last time ${list.lastResult.perfect}/${list.lastResult.total} on the first try`;
     $('active-count').textContent = meta;
+    const p = pausedFor(list);
+    $('btn-practice').innerHTML = p
+      ? `▶&nbsp;&nbsp;Resume — ${p.queue.length} to go`
+      : '▶&nbsp;&nbsp;¡A practicar!';
+    $('btn-startover').classList.toggle('hidden', !p);
   }
   const others = data.lists.filter(l => l.id !== data.activeListId);
   const box = $('past-lists');
@@ -344,6 +350,7 @@ function saveList() {
     list.name = name;
     list.words = words;
     data.activeListId = list.id;
+    if (data.paused && data.paused.listId === editingId) data.paused = null;  // words changed
   } else {
     data.lists.unshift({ id: 'l' + Date.now(), name, words, createdAt: Date.now() });
     data.activeListId = data.lists[0].id;
@@ -385,6 +392,7 @@ async function syncCloudLists() {
         if (existing.name !== name || JSON.stringify(existing.words) !== JSON.stringify(words)) {
           existing.name = name;
           existing.words = words;
+          if (data.paused && data.paused.listId === id) data.paused = null;
           changed = true;
         }
       } else {
@@ -401,6 +409,7 @@ async function syncCloudLists() {
 function deleteList() {
   if (!editingId || !confirm('Delete this list?')) return;
   data.lists = data.lists.filter(l => l.id !== editingId);
+  if (data.paused && data.paused.listId === editingId) data.paused = null;
   if (data.activeListId === editingId) data.activeListId = data.lists.length ? data.lists[0].id : null;
   save(); renderHome(); show('home');
 }
@@ -499,19 +508,60 @@ const speakSentence = word => speak(pick(SENTENCE_FRAMES).replace('{w}', word), 
 const PRAISE = ['¡Muy bien!', '¡Excelente!', '¡Perfecto!', '¡Genial!', '¡Fantástico!', '¡Súper!', '¡Increíble!'];
 let session = null;
 
-function startPractice() {
+// A paused session is resumable on this device for 24h, for the matching list.
+function pausedFor(list) {
+  const p = data.paused;
+  if (!p || !list || p.listId !== list.id) return null;
+  if (!Array.isArray(p.queue) || !p.queue.length) return null;
+  if (Date.now() - (p.savedAt || 0) > 24 * 3600 * 1000) return null;
+  return p;
+}
+
+function saveSession() {
+  if (!session) return;
+  // The in-progress word goes back to the front (fresh tries on resume);
+  // in copy mode it's already re-queued, so don't add it twice.
+  const head = (session.mode !== 'copy' && session.current) ? [session.current] : [];
+  data.paused = {
+    listId: session.listId,
+    queue: head.concat(session.queue),
+    done: session.done,
+    results: session.results,
+    requeued: [...session.requeued],
+    savedAt: Date.now(),
+  };
+  save();
+}
+
+function startPractice(fresh = false) {
   const list = activeList();
   if (!list || !list.words.length) return;
-  session = {
-    listId: list.id,
-    queue: shuffle(list.words),
-    done: 0,
-    current: null,
-    tries: 0,           // wrong attempts on the current word
-    mode: 'spell',      // 'spell' (hidden word) | 'copy' (word revealed, type it once)
-    requeued: new Set(),
-    results: {},        // word -> { misses, firstTry }
-  };
+  const p = fresh ? null : pausedFor(list);
+  if (p) {
+    session = {
+      listId: list.id,
+      queue: p.queue.slice(),
+      done: p.done || 0,
+      current: null,
+      tries: 0,
+      mode: 'spell',
+      requeued: new Set(p.requeued || []),
+      results: p.results || {},
+    };
+  } else {
+    data.paused = null;
+    save();
+    session = {
+      listId: list.id,
+      queue: shuffle(list.words),
+      done: 0,
+      current: null,
+      tries: 0,           // wrong attempts on the current word
+      mode: 'spell',      // 'spell' (hidden word) | 'copy' (word revealed, type it once)
+      requeued: new Set(),
+      results: {},        // word -> { misses, firstTry }
+    };
+  }
   show('practice');
   nextWord();
 }
@@ -540,6 +590,7 @@ function nextWord() {
   const pic = emojiFor(session.current);
   $('word-pic').textContent = pic || '';
   $('word-pic').classList.toggle('hidden', !pic);
+  saveSession();
   speak(session.current);
   $('answer').focus();
 }
@@ -583,6 +634,7 @@ function completeWord() {
   session.done++;
   $('btn-check').disabled = true;
   updateProgress();
+  saveSession();
   setTimeout(nextWord, 1400);
 }
 
@@ -598,6 +650,7 @@ function revealWord() {
     const pos = Math.min(session.queue.length, 2 + Math.floor(Math.random() * (session.queue.length + 1)));
     session.queue.splice(pos, 0, word);
   }
+  saveSession();
   speak(word);
   $('answer').value = '';
   $('answer').focus();
@@ -636,6 +689,7 @@ function check() {
     if (res.firstTry === null) res.firstTry = false;
     chime(false);
     renderAttemptRow(raw, word);
+    saveSession();
     const left = 1 + data.settings.retries - session.tries;
     if (left > 0) {
       $('prompt-msg').textContent = left === 1
@@ -655,10 +709,9 @@ function finishSession() {
   const tricky = words.filter(w => session.results[w].misses > 0);
 
   const list = data.lists.find(l => l.id === session.listId);
-  if (list) {
-    list.lastResult = { perfect: perfect.length, total: words.length, at: Date.now() };
-    save();
-  }
+  if (list) list.lastResult = { perfect: perfect.length, total: words.length, at: Date.now() };
+  data.paused = null;   // finished — nothing to resume
+  save();
 
   $('done-title').textContent = tricky.length === 0 ? '¡Perfecto! 🌟' : '¡Lo lograste!';
   const stars = Math.max(1, Math.round(perfect.length / Math.max(1, words.length) * 5));
@@ -754,7 +807,8 @@ function applySettingsUI() {
 
 /* ---------- wire up ---------- */
 function init() {
-  $('btn-practice').addEventListener('click', startPractice);
+  $('btn-practice').addEventListener('click', () => startPractice(false));
+  $('btn-startover').addEventListener('click', () => startPractice(true));
   $('btn-new-list').addEventListener('click', () => openEdit(null));
   $('btn-edit-active').addEventListener('click', () => activeList() && openEdit(activeList().id));
   $('btn-settings').addEventListener('click', () => { applySettingsUI(); show('settings'); });
@@ -808,7 +862,7 @@ function init() {
     });
   });
 
-  $('btn-again').addEventListener('click', startPractice);
+  $('btn-again').addEventListener('click', () => startPractice(true));
   $('btn-done-home').addEventListener('click', () => { renderHome(); show('home'); });
 
   $('btn-settings-back').addEventListener('click', () => { renderHome(); show('home'); });
