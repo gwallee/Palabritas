@@ -1,7 +1,7 @@
 'use strict';
 /* Palabritas — Spanish spelling practice PWA */
 
-const APP_VERSION = '1.5.0';
+const APP_VERSION = '1.6.0';
 
 /* ---------- helpers ---------- */
 const $ = id => document.getElementById(id);
@@ -21,12 +21,17 @@ const DEFAULTS = {
   activeListId: null,
   paused: null,   // snapshot of an unfinished practice session (same device)
   settings: { voiceURI: '', rate: 0.95, strict: false, retries: 2 },
+  progress: { totalPoints: 0, streak: 0, lastPracticeDate: null },   // per-device, not synced
 };
 
 function load() {
   try {
     const raw = JSON.parse(localStorage.getItem('palabritas') || 'null');
-    if (raw) return { ...DEFAULTS, ...raw, settings: { ...DEFAULTS.settings, ...(raw.settings || {}) } };
+    if (raw) return {
+      ...DEFAULTS, ...raw,
+      settings: { ...DEFAULTS.settings, ...(raw.settings || {}) },
+      progress: { ...DEFAULTS.progress, ...(raw.progress || {}) },
+    };
   } catch (e) { /* corrupted storage — start fresh */ }
   return JSON.parse(JSON.stringify(DEFAULTS));
 }
@@ -139,6 +144,10 @@ function show(name) {
 
 /* ---------- home ---------- */
 function renderHome() {
+  $('stat-points').textContent = data.progress.totalPoints;
+  $('stat-streak').textContent = data.progress.streak;
+  $('stat-streak-pill').classList.toggle('hidden', !data.progress.streak);
+
   const list = activeList();
   $('active-card').classList.toggle('hidden', !list);
   $('empty-card').classList.toggle('hidden', !!list);
@@ -296,6 +305,88 @@ async function scanPhoto(file) {
   }
 }
 
+/* ---------- picture generation (self-serve AI illustrations) ---------- */
+// One-time, in-app: for each word, ask Pollinations.ai (free, no key) for a
+// picture and stage its URL. Nothing is downloaded/committed as a file — the
+// URL itself rides along in the list JSON through the existing ☁️ cloud-save
+// flow. Offline reliability after that depends on the service worker caching
+// each image the first time it's actually loaded (see sw.js); an image that
+// was never cached just falls back to the emoji hint.
+const IMG_STYLE = "flat design vector illustration, thick black outlines, solid flat colors, "
+  + "minimalist, cute mascot art style, children's educational app, no text, no words, no letters, "
+  + 'simple pastel solid background';
+
+const pollinationsUrl = word =>
+  'https://image.pollinations.ai/prompt/' + encodeURIComponent(`${IMG_STYLE}, ${word}`)
+  + '?width=512&height=512&nologo=true&model=flux&seed=7';
+
+function preloadImage(url) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(url);
+    img.onerror = reject;
+    img.src = url;
+  });
+}
+
+// word (canon) -> { image }, staged for the list currently being edited.
+let editingExtras = {};
+
+function setGenProgress(text, frac) {
+  $('gen-progress').classList.remove('hidden');
+  $('gen-status').textContent = text;
+  $('gen-fill').style.width = Math.round(Math.max(0, Math.min(1, frac || 0)) * 100) + '%';
+}
+
+function renderPicGrid() {
+  const words = parseWords($('words-input').value);
+  const grid = $('pic-grid');
+  grid.innerHTML = '';
+  const any = words.some(w => editingExtras[canon(w)] && editingExtras[canon(w)].image);
+  grid.classList.toggle('hidden', !any);
+  words.forEach(w => {
+    const ex = editingExtras[canon(w)];
+    if (!ex || !ex.image) return;
+    const item = document.createElement('div');
+    item.className = 'pic-item';
+    const img = document.createElement('img');
+    img.src = ex.image;
+    img.alt = w;
+    const rm = document.createElement('button');
+    rm.className = 'pic-remove';
+    rm.textContent = '✕';
+    rm.setAttribute('aria-label', 'Use emoji instead of picture for ' + w);
+    rm.addEventListener('click', () => { delete ex.image; renderPicGrid(); });
+    const label = document.createElement('div');
+    label.className = 'pic-word';
+    label.textContent = w;
+    item.append(img, rm, label);
+    grid.appendChild(item);
+  });
+}
+
+async function generateImages() {
+  const words = parseWords($('words-input').value);
+  if (!words.length) { alert('Add some words first 🙂'); return; }
+  const todo = words.filter(w => !(editingExtras[canon(w)] && editingExtras[canon(w)].image));
+  if (!todo.length) { alert('Every word already has a picture!'); return; }
+  const btn = $('btn-gen-images');
+  btn.disabled = true;
+  for (let i = 0; i < todo.length; i++) {
+    const w = todo[i];
+    setGenProgress(`Generating pictures… ${i + 1} of ${todo.length}`, i / todo.length);
+    try {
+      const url = pollinationsUrl(w);
+      await preloadImage(url);
+      editingExtras[canon(w)] = { ...(editingExtras[canon(w)] || {}), image: url };
+      renderPicGrid();
+    } catch (e) { /* generation failed — this word just falls back to emoji */ }
+    if (i < todo.length - 1) await new Promise(r => setTimeout(r, 2500));  // free-tier: 1 request at a time
+  }
+  setGenProgress("Done! Tap ✕ on any picture you don't like to use the emoji instead.", 1);
+  btn.disabled = false;
+}
+
 function openEdit(listId) {
   editingId = listId || null;
   const list = listId ? data.lists.find(l => l.id === listId) : null;
@@ -304,6 +395,14 @@ function openEdit(listId) {
   $('words-input').value = list ? list.words.join('\n') : '';
   $('btn-delete-list').classList.toggle('hidden', !list);
   $('scan-progress').classList.add('hidden');
+  $('gen-progress').classList.add('hidden');
+  editingExtras = {};
+  if (list && list.extras) {
+    for (const [k, v] of Object.entries(list.extras)) {
+      if (v && v.image) editingExtras[k] = { image: v.image };
+    }
+  }
+  renderPicGrid();
   renderChips();
   show('edit');
 }
@@ -340,6 +439,21 @@ function renderChips() {
     chip.append(t, x);
     box.appendChild(chip);
   });
+  renderPicGrid();
+}
+
+// Merges staged pictures into whatever extras (emoji/sentence) the list already
+// carries, keyed the same way cloud-list extras are: canon(word) -> {...}.
+function buildExtras(words, prevExtras) {
+  const out = {};
+  words.forEach(w => {
+    const key = canon(w);
+    const merged = { ...((prevExtras && prevExtras[key]) || {}) };
+    const img = editingExtras[key] && editingExtras[key].image;
+    if (img) merged.image = img; else delete merged.image;
+    if (Object.keys(merged).length) out[key] = merged;
+  });
+  return Object.keys(out).length ? out : undefined;
 }
 
 function saveList() {
@@ -350,10 +464,12 @@ function saveList() {
     const list = data.lists.find(l => l.id === editingId);
     list.name = name;
     list.words = words;
+    list.extras = buildExtras(words, list.extras);
     data.activeListId = list.id;
     if (data.paused && data.paused.listId === editingId) data.paused = null;  // words changed
   } else {
-    data.lists.unshift({ id: 'l' + Date.now(), name, words, createdAt: Date.now() });
+    const extras = buildExtras(words, null);
+    data.lists.unshift({ id: 'l' + Date.now(), name, words, extras, createdAt: Date.now() });
     data.activeListId = data.lists[0].id;
   }
   save(); renderHome(); show('home');
@@ -398,7 +514,9 @@ function cloudSaveActiveList() {
   if (!list) return;
   if (list.id.startsWith('cloud-')) { alert('This list is already in the cloud.'); return; }
   const id = new Date().toISOString().slice(0, 10) + '-' + slugify(list.name);
-  const body = JSON.stringify({ id, name: list.name, words: list.words }, null, 2) + '\n';
+  const payload = { id, name: list.name, words: list.words };
+  if (list.extras && Object.keys(list.extras).length) payload.extras = list.extras;
+  const body = JSON.stringify(payload, null, 2) + '\n';
   const url = 'https://github.com/' + REPO + '/new/main'
     + '?filename=' + encodeURIComponent('lists/' + id + '.json')
     + '&value=' + encodeURIComponent(body);
@@ -610,7 +728,30 @@ function speakSentence(word) {
 
 /* ---------- practice ---------- */
 const PRAISE = ['¡Muy bien!', '¡Excelente!', '¡Perfecto!', '¡Genial!', '¡Fantástico!', '¡Súper!', '¡Increíble!'];
+// Points for a correct answer, indexed by how many wrong tries came first
+// (index 2 covers "3rd try or later"). A word that gets revealed earns 0.
+const POINTS_BY_TRY = [10, 8, 5];
 let session = null;
+
+const todayStr = () => {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+};
+
+// A streak day requires finishing a full practice round that day. Consecutive
+// calendar days (not 24h windows) extend it; any gap resets it to 1.
+function updateStreak() {
+  const today = todayStr();
+  const last = data.progress.lastPracticeDate;
+  if (last === today) return;
+  if (last) {
+    const gapDays = Math.round((new Date(today) - new Date(last)) / 86400000);
+    data.progress.streak = gapDays === 1 ? data.progress.streak + 1 : 1;
+  } else {
+    data.progress.streak = 1;
+  }
+  data.progress.lastPracticeDate = today;
+}
 
 // A paused session is resumable on this device for 24h, for the matching list.
 function pausedFor(list) {
@@ -632,6 +773,7 @@ function saveSession() {
     done: session.done,
     results: session.results,
     requeued: [...session.requeued],
+    pointsEarned: session.pointsEarned,
     savedAt: Date.now(),
   };
   save();
@@ -651,6 +793,7 @@ function startPractice(fresh = false) {
       mode: 'spell',
       requeued: new Set(p.requeued || []),
       results: p.results || {},
+      pointsEarned: p.pointsEarned || 0,
     };
   } else {
     data.paused = null;
@@ -664,6 +807,7 @@ function startPractice(fresh = false) {
       mode: 'spell',      // 'spell' (hidden word) | 'copy' (word revealed, type it once)
       requeued: new Set(),
       results: {},        // word -> { misses, firstTry }
+      pointsEarned: 0,
     };
   }
   show('practice');
@@ -691,13 +835,33 @@ function nextWord() {
   if (!session.results[session.current]) session.results[session.current] = { misses: 0, firstTry: null };
   updateProgress();
   $('prompt-msg').textContent = 'Listen… then spell it! 👂';
-  const ex = wordExtra(session.current);
-  const pic = (ex && ex.emoji) || emojiFor(session.current);
-  $('word-pic').textContent = pic || '';
-  $('word-pic').classList.toggle('hidden', !pic);
+  renderWordPic(session.current);
   saveSession();
   speak(session.current);
   $('answer').focus();
+}
+
+// Prefers the enriched AI picture over the built-in emoji; falls back to emoji
+// if the image never loads (e.g. offline and never cached on this device).
+function renderWordPic(word) {
+  const pic = $('word-pic');
+  const ex = wordExtra(word);
+  const emoji = (ex && ex.emoji) || emojiFor(word);
+  if (ex && ex.image) {
+    pic.innerHTML = '';
+    const img = document.createElement('img');
+    img.src = ex.image;
+    img.alt = '';
+    img.addEventListener('error', () => {
+      pic.textContent = emoji || '';
+      pic.classList.toggle('hidden', !emoji);
+    });
+    pic.appendChild(img);
+    pic.classList.remove('hidden');
+  } else {
+    pic.textContent = emoji || '';
+    pic.classList.toggle('hidden', !emoji);
+  }
 }
 
 function renderAttemptRow(attempt, target) {
@@ -745,6 +909,7 @@ function completeWord() {
 
 function revealWord() {
   const word = session.current;
+  session.results[word].revealed = true;   // seen the answer — no points even if she gets it right after
   $('reveal-word').textContent = word;
   $('reveal-box').classList.remove('hidden');
   $('btn-spellout').classList.remove('hidden');
@@ -784,6 +949,12 @@ function check() {
   const m = matches(raw, word);
   if (m !== 'no') {
     if (res.firstTry === null) res.firstTry = session.tries === 0;
+    // Points count once per word, and never for a word that's already been
+    // revealed (a hidden re-test success afterward still counts as missed).
+    if (!res.scored && !res.revealed) {
+      session.pointsEarned += POINTS_BY_TRY[Math.min(session.tries, POINTS_BY_TRY.length - 1)];
+      res.scored = true;
+    }
     chime(true);
     if (m === 'accents') flash(`¡Sí! Recuerda: ${word} ✨`, 'info');
     else flash(pick(PRAISE) + ' ' + pick(['⭐', '🌟', '🎈', '🦜', '💚']), 'good');
@@ -815,6 +986,8 @@ function finishSession() {
 
   const list = data.lists.find(l => l.id === session.listId);
   if (list) list.lastResult = { perfect: perfect.length, total: words.length, at: Date.now() };
+  data.progress.totalPoints += session.pointsEarned;
+  updateStreak();
   data.paused = null;   // finished — nothing to resume
   save();
 
@@ -822,6 +995,8 @@ function finishSession() {
   const stars = Math.max(1, Math.round(perfect.length / Math.max(1, words.length) * 5));
   $('done-stars').textContent = '⭐'.repeat(stars) + '☆'.repeat(5 - stars);
   $('done-summary').textContent = `${perfect.length} of ${words.length} words right on the first try`;
+  $('done-points').textContent = `⭐ +${session.pointsEarned} points · ${data.progress.totalPoints} total`
+    + (data.progress.streak > 1 ? ` · 🔥 ${data.progress.streak}-day streak` : '');
 
   const box = $('tricky-box'), listEl = $('tricky-list');
   listEl.innerHTML = '';
@@ -940,6 +1115,7 @@ function init() {
     if (f) scanPhoto(f);
     e.target.value = '';
   });
+  $('btn-gen-images').addEventListener('click', generateImages);
   $('btn-sentence').addEventListener('click', () => session && session.current && speakSentence(session.current));
 
   $('btn-quit').addEventListener('click', () => {

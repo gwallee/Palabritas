@@ -25,6 +25,10 @@
       <div class="logo">🦜</div>
       <h1>Palabritas</h1>
       <p class="tagline">Spanish spelling practice</p>
+      <div class="stats-row">
+        <span class="stat-pill">⭐ <span id="stat-points">0</span> pts</span>
+        <span class="stat-pill hidden" id="stat-streak-pill">🔥 <span id="stat-streak">0</span>-day streak</span>
+      </div>
     </header>
 
     <div id="voice-banner" class="banner hidden">
@@ -83,6 +87,13 @@
     <div class="chips-label muted" id="chips-label"></div>
     <div class="chips" id="chips"></div>
 
+    <button class="big-btn secondary slim" id="btn-gen-images">🎨 Generate pictures for these words</button>
+    <div class="scan-progress hidden" id="gen-progress">
+      <div class="muted small" id="gen-status">Starting…</div>
+      <div class="progress-bar"><div class="progress-fill" id="gen-fill"></div></div>
+    </div>
+    <div class="pic-grid hidden" id="pic-grid"></div>
+
     <button class="big-btn primary" id="btn-save-list">Save list ✓</button>
     <button class="text-btn danger hidden" id="btn-delete-list">🗑 Delete this list</button>
   </section>
@@ -135,6 +146,7 @@
       <h2 id="done-title">¡Lo lograste!</h2>
       <div class="done-stars" id="done-stars"></div>
       <p class="done-summary" id="done-summary"></p>
+      <p class="done-points" id="done-points"></p>
       <div class="tricky-box hidden" id="tricky-box">
         <h3>Practice these again 💪</h3>
         <div id="tricky-list"></div>

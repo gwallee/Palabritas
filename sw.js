@@ -1,5 +1,5 @@
 /* Palabritas service worker — makes the app work fully offline */
-const CACHE = 'palabritas-v6';
+const CACHE = 'palabritas-v7';
 const ASSETS = [
   './',
   './index.html',
@@ -36,7 +36,25 @@ self.addEventListener('activate', e => {
 
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
-  if (e.request.method !== 'GET' || url.origin !== self.location.origin) return;
+  if (e.request.method !== 'GET') return;
+
+  // AI word-picture images (from the in-app "Generate pictures" button) are
+  // hotlinked from Pollinations.ai, not vendored — cache-first once fetched so
+  // a word seen before still shows offline. Never-cached ones fall back to emoji.
+  if (url.hostname === 'image.pollinations.ai') {
+    e.respondWith(
+      caches.match(e.request).then(cached => cached || fetch(e.request).then(resp => {
+        if (resp && resp.ok) {
+          const copy = resp.clone();
+          caches.open(CACHE).then(c => c.put(e.request, copy));
+        }
+        return resp;
+      }))
+    );
+    return;
+  }
+
+  if (url.origin !== self.location.origin) return;
 
   // lists.json is the shared word-list feed: network-first so new lists arrive promptly.
   if (url.pathname.endsWith('/lists.json')) {
