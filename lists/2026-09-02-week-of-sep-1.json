@@ -1,0 +1,48 @@
+{
+  "id": "2026-09-02-week-of-sep-1",
+  "name": "Week of Sep 1",
+  "words": [
+    "cable",
+    "comunicarse",
+    "aunque",
+    "contrario",
+    "capaz",
+    "karate",
+    "kayak",
+    "quince",
+    "quemar",
+    "quitar"
+  ],
+  "extras": {
+    "cable": {
+      "image": "https://image.pollinations.ai/prompt/flat%20design%20vector%20illustration%2C%20thick%20black%20outlines%2C%20solid%20flat%20colors%2C%20minimalist%2C%20cute%20mascot%20art%20style%2C%20children's%20educational%20app%2C%20no%20text%2C%20no%20words%2C%20no%20letters%2C%20simple%20pastel%20solid%20background%2C%20cable?width=512&height=512&nologo=true&model=flux&seed=7"
+    },
+    "comunicarse": {
+      "image": "https://image.pollinations.ai/prompt/flat%20design%20vector%20illustration%2C%20thick%20black%20outlines%2C%20solid%20flat%20colors%2C%20minimalist%2C%20cute%20mascot%20art%20style%2C%20children's%20educational%20app%2C%20no%20text%2C%20no%20words%2C%20no%20letters%2C%20simple%20pastel%20solid%20background%2C%20comunicarse?width=512&height=512&nologo=true&model=flux&seed=7"
+    },
+    "aunque": {
+      "image": "https://image.pollinations.ai/prompt/flat%20design%20vector%20illustration%2C%20thick%20black%20outlines%2C%20solid%20flat%20colors%2C%20minimalist%2C%20cute%20mascot%20art%20style%2C%20children's%20educational%20app%2C%20no%20text%2C%20no%20words%2C%20no%20letters%2C%20simple%20pastel%20solid%20background%2C%20aunque?width=512&height=512&nologo=true&model=flux&seed=7"
+    },
+    "contrario": {
+      "image": "https://image.pollinations.ai/prompt/flat%20design%20vector%20illustration%2C%20thick%20black%20outlines%2C%20solid%20flat%20colors%2C%20minimalist%2C%20cute%20mascot%20art%20style%2C%20children's%20educational%20app%2C%20no%20text%2C%20no%20words%2C%20no%20letters%2C%20simple%20pastel%20solid%20background%2C%20contrario?width=512&height=512&nologo=true&model=flux&seed=7"
+    },
+    "capaz": {
+      "image": "https://image.pollinations.ai/prompt/flat%20design%20vector%20illustration%2C%20thick%20black%20outlines%2C%20solid%20flat%20colors%2C%20minimalist%2C%20cute%20mascot%20art%20style%2C%20children's%20educational%20app%2C%20no%20text%2C%20no%20words%2C%20no%20letters%2C%20simple%20pastel%20solid%20background%2C%20capaz?width=512&height=512&nologo=true&model=flux&seed=7"
+    },
+    "karate": {
+      "image": "https://image.pollinations.ai/prompt/flat%20design%20vector%20illustration%2C%20thick%20black%20outlines%2C%20solid%20flat%20colors%2C%20minimalist%2C%20cute%20mascot%20art%20style%2C%20children's%20educational%20app%2C%20no%20text%2C%20no%20words%2C%20no%20letters%2C%20simple%20pastel%20solid%20background%2C%20karate?width=512&height=512&nologo=true&model=flux&seed=7"
+    },
+    "kayak": {
+      "image": "https://image.pollinations.ai/prompt/flat%20design%20vector%20illustration%2C%20thick%20black%20outlines%2C%20solid%20flat%20colors%2C%20minimalist%2C%20cute%20mascot%20art%20style%2C%20children's%20educational%20app%2C%20no%20text%2C%20no%20words%2C%20no%20letters%2C%20simple%20pastel%20solid%20background%2C%20kayak?width=512&height=512&nologo=true&model=flux&seed=7"
+    },
+    "quince": {
+      "image": "https://image.pollinations.ai/prompt/flat%20design%20vector%20illustration%2C%20thick%20black%20outlines%2C%20solid%20flat%20colors%2C%20minimalist%2C%20cute%20mascot%20art%20style%2C%20children's%20educational%20app%2C%20no%20text%2C%20no%20words%2C%20no%20letters%2C%20simple%20pastel%20solid%20background%2C%20quince?width=512&height=512&nologo=true&model=flux&seed=7"
+    },
+    "quemar": {
+      "image": "https://image.pollinations.ai/prompt/flat%20design%20vector%20illustration%2C%20thick%20black%20outlines%2C%20solid%20flat%20colors%2C%20minimalist%2C%20cute%20mascot%20art%20style%2C%20children's%20educational%20app%2C%20no%20text%2C%20no%20words%2C%20no%20letters%2C%20simple%20pastel%20solid%20background%2C%20quemar?width=512&height=512&nologo=true&model=flux&seed=7"
+    },
+    "quitar": {
+      "image": "https://image.pollinations.ai/prompt/flat%20design%20vector%20illustration%2C%20thick%20black%20outlines%2C%20solid%20flat%20colors%2C%20minimalist%2C%20cute%20mascot%20art%20style%2C%20children's%20educational%20app%2C%20no%20text%2C%20no%20words%2C%20no%20letters%2C%20simple%20pastel%20solid%20background%2C%20quitar?width=512&height=512&nologo=true&model=flux&seed=7"
+    }
+  }
+}
