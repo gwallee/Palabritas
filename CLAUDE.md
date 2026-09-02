@@ -48,7 +48,7 @@ backend; word lists and scores live in each device's localStorage.
   activeListId,
   paused: null | { listId, queue[], done, results, requeued[], pointsEarned, savedAt },
   settings: { voiceURI, rate, strict, retries },
-  progress: { totalPoints, streak, lastPracticeDate } }
+  progress: { totalPoints, streak, lastPracticeDate, mastery, trouble } }
 ```
 
 - List ids: `l<timestamp>` for device-created, `cloud-<id>` for lists from `lists.json`.
@@ -136,6 +136,11 @@ backend; word lists and scores live in each device's localStorage.
 
 ## Practice loop specifics
 
+- v1.7 adds Learn, Practice, Test, and persistent Trouble Words. Learn shows the spelling,
+  picture, speech, and `syllables.js` output; unsupported or low-confidence words show no
+  split. Test is one-try and hides pictures, slow speech, sentences, and letter feedback.
+  Trouble words graduate after two clean first-try spellings. Per-word mastery is 0–3 stars.
+
 - Random order via shuffle; missed word re-queued 2+ positions later (once per word).
 - 3 strikes (1 + `retries`=2) → word is revealed, she copies it once ("copy" mode), and it
   re-queues; it counts as missed for the end screen ("tricky words" get a ⭐ redo option).
@@ -186,9 +191,11 @@ git push origin main && git push origin main:gh-pages
   uses no-cache requests. v1.4.0: ☁️ Save to cloud (token-free, prefilled GitHub commit
   page) + per-file `lists/` store with sha-based sync. v1.5.0: per-word extras (emoji +
   teaching sentence) on cloud lists; Claude enriches each week's list on request.
-  v1.6.0 (current): points (10/8/5 by try) + streaks, per-device only by explicit
+  v1.6.0: points (10/8/5 by try) + streaks, per-device only by explicit
   choice — no accounts/backend exist to sync them; self-serve 🎨 Generate pictures
   button (Pollinations.ai AI illustrations, staged as URLs, no Claude round-trip).
+- v1.7.0 (feature branch): Learn/Test modes, Trouble Words, per-word mastery,
+  conservative Spanish syllabification, richer praise, and mini-streak celebrations.
 - `lists.json` is committed empty (`[]`) — no AI/test lists were ever deployed; a "Cloud
   Test List" existed only inside a local test browser during development.
 - **Removed by Brian's request (2026-08-24, "that was an accident"):** an uncommitted

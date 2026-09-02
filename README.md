@@ -27,6 +27,12 @@ Everything is stored **on the device** (localStorage) — no accounts, no server
 - **Accents:** by default "arbol" is accepted for "árbol" but the correct spelling is shown;
   a settings toggle makes accents required. The letter **ñ always has to be right** — it's
   its own letter, not an accent.
+- **Learn, Practice, Test:** Learn introduces every word with its picture, pronunciation,
+  and a conservative Spanish syllable split. Practice keeps the friendly hints and extra
+  tries; Test gives one audio-first attempt with hints hidden. Missed words stay in a
+  per-device Trouble Words set until they are spelled cleanly twice.
+- **Mastery:** each word earns up to three stars through consecutive first-try spellings.
+  Progress, trouble words, points, and streaks remain private to that device.
 
 ## iPhone setup (one time)
 

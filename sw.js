@@ -1,10 +1,11 @@
 /* Palabritas service worker — makes the app work fully offline */
-const CACHE = 'palabritas-v7';
+const CACHE = 'palabritas-v8';
 const ASSETS = [
   './',
   './index.html',
   './style.css',
   './app.js',
+  './syllables.js',
   './manifest.webmanifest',
   './icon-192.png',
   './icon-512.png',
