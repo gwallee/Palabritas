@@ -1,7 +1,7 @@
 'use strict';
 /* Palabritas — Spanish spelling practice PWA */
 
-const APP_VERSION = '1.6.0';
+const APP_VERSION = '1.7.0';
 
 /* ---------- helpers ---------- */
 const $ = id => document.getElementById(id);
@@ -21,7 +21,7 @@ const DEFAULTS = {
   activeListId: null,
   paused: null,   // snapshot of an unfinished practice session (same device)
   settings: { voiceURI: '', rate: 0.95, strict: false, retries: 2 },
-  progress: { totalPoints: 0, streak: 0, lastPracticeDate: null },   // per-device, not synced
+  progress: { totalPoints: 0, streak: 0, lastPracticeDate: null, mastery: {}, trouble: {} },
 };
 
 function load() {
@@ -38,6 +38,22 @@ function load() {
 let data = load();
 const save = () => localStorage.setItem('palabritas', JSON.stringify(data));
 const activeList = () => data.lists.find(l => l.id === data.activeListId) || null;
+const wordKey = (listId, word) => `${listId}|${canon(word)}`;
+const masteryFor = (listId, word) => data.progress.mastery[wordKey(listId, word)] || { stars: 0, clean: 0 };
+const troubleFor = (listId, word) => data.progress.trouble[wordKey(listId, word)] || null;
+
+function recordMastery(listId, word, clean) {
+  const key = wordKey(listId, word);
+  const old = masteryFor(listId, word);
+  const nextClean = clean ? old.clean + 1 : 0;
+  data.progress.mastery[key] = { clean: nextClean, stars: clean ? Math.min(3, Math.max(old.stars, nextClean)) : Math.max(0, old.stars - 1) };
+  if (!clean) data.progress.trouble[key] = { misses: (troubleFor(listId, word)?.misses || 0) + 1, clean: 0, updatedAt: Date.now() };
+  else if (data.progress.trouble[key]) {
+    data.progress.trouble[key].clean = (data.progress.trouble[key].clean || 0) + 1;
+    data.progress.trouble[key].updatedAt = Date.now();
+    if (data.progress.trouble[key].clean >= 2) delete data.progress.trouble[key];
+  }
+}
 
 /* ---------- word normalization ---------- */
 const canon = s => s.trim().toLowerCase().replace(/\s+/g, ' ');
@@ -155,12 +171,17 @@ function renderHome() {
     $('active-name').textContent = list.name;
     let meta = list.words.length + ' words';
     if (list.lastResult) meta += ` · last time ${list.lastResult.perfect}/${list.lastResult.total} on the first try`;
+    const mastered = list.words.filter(w => masteryFor(list.id, w).stars === 3).length;
+    if (mastered) meta += ` · ${mastered}/${list.words.length} mastered ⭐`;
     $('active-count').textContent = meta;
     const p = pausedFor(list);
     $('btn-practice').innerHTML = p
       ? `▶&nbsp;&nbsp;Resume — ${p.queue.length} to go`
       : '▶&nbsp;&nbsp;¡A practicar!';
     $('btn-startover').classList.toggle('hidden', !p);
+    const trouble = list.words.filter(w => troubleFor(list.id, w));
+    $('btn-trouble').classList.toggle('hidden', !trouble.length);
+    $('trouble-count').textContent = trouble.length ? `(${trouble.length})` : '';
     $('btn-cloud-save').classList.toggle('hidden', list.id.startsWith('cloud-'));
   }
   const others = data.lists.filter(l => l.id !== data.activeListId);
@@ -727,7 +748,8 @@ function speakSentence(word) {
 }
 
 /* ---------- practice ---------- */
-const PRAISE = ['¡Muy bien!', '¡Excelente!', '¡Perfecto!', '¡Genial!', '¡Fantástico!', '¡Súper!', '¡Increíble!'];
+const PRAISE = ['¡Muy bien!', '¡Excelente!', '¡Perfecto!', '¡Genial!', '¡Fantástico!', '¡Súper!', '¡Increíble!', '¡Qué buena ortografía!', '¡Lo clavaste!', '¡Eres una campeona!'];
+const MINI_STREAKS = { 3: '🔥 ¡3 seguidas!', 5: '🌟 ¡5 seguidas! ¡Imparable!', 10: '🚀 ¡10 seguidas! ¡Sensacional!' };
 // Points for a correct answer, indexed by how many wrong tries came first
 // (index 2 covers "3rd try or later"). A word that gets revealed earns 0.
 const POINTS_BY_TRY = [10, 8, 5];
@@ -764,6 +786,7 @@ function pausedFor(list) {
 
 function saveSession() {
   if (!session) return;
+  if (session.kind !== 'practice') { save(); return; }
   // The in-progress word goes back to the front (fresh tries on resume);
   // in copy mode it's already re-queued, so don't add it twice.
   const head = (session.mode !== 'copy' && session.current) ? [session.current] : [];
@@ -774,15 +797,20 @@ function saveSession() {
     results: session.results,
     requeued: [...session.requeued],
     pointsEarned: session.pointsEarned,
+    kind: session.kind,
+    cleanRun: session.cleanRun,
     savedAt: Date.now(),
   };
   save();
 }
 
-function startPractice(fresh = false) {
+function startPractice(fresh = false, kind = 'practice') {
   const list = activeList();
   if (!list || !list.words.length) return;
-  const p = fresh ? null : pausedFor(list);
+  const p = (!fresh && kind === 'practice') ? pausedFor(list) : null;
+  let words = list.words;
+  if (kind === 'trouble') words = words.filter(w => troubleFor(list.id, w));
+  if (!words.length) return;
   if (p) {
     session = {
       listId: list.id,
@@ -794,13 +822,14 @@ function startPractice(fresh = false) {
       requeued: new Set(p.requeued || []),
       results: p.results || {},
       pointsEarned: p.pointsEarned || 0,
+      kind: p.kind || 'practice',
+      cleanRun: p.cleanRun || 0,
     };
   } else {
-    data.paused = null;
-    save();
+    if (kind === 'practice') { data.paused = null; save(); }
     session = {
       listId: list.id,
-      queue: shuffle(list.words),
+      queue: kind === 'learn' ? words.slice() : shuffle(words),
       done: 0,
       current: null,
       tries: 0,           // wrong attempts on the current word
@@ -808,9 +837,12 @@ function startPractice(fresh = false) {
       requeued: new Set(),
       results: {},        // word -> { misses, firstTry }
       pointsEarned: 0,
+      kind,
+      cleanRun: 0,
     };
   }
   show('practice');
+  $('view-practice').classList.toggle('test-mode', session.kind === 'test');
   nextWord();
 }
 
@@ -828,17 +860,43 @@ function nextWord() {
   $('result-flash').classList.add('hidden');
   $('answer').value = '';
   $('btn-check').disabled = false;
+  $('answer-area').classList.remove('hidden');
+  $('learn-card').classList.add('hidden');
   if (!session.queue.length) { finishSession(); return; }
   session.current = session.queue.shift();
   session.tries = 0;
   session.mode = 'spell';
   if (!session.results[session.current]) session.results[session.current] = { misses: 0, firstTry: null };
   updateProgress();
+  if (session.kind === 'learn') { renderLearnWord(); return; }
   $('prompt-msg').textContent = 'Listen… then spell it! 👂';
   renderWordPic(session.current);
   saveSession();
   speak(session.current);
   $('answer').focus();
+}
+
+function renderLearnWord() {
+  const word = session.current;
+  $('answer-area').classList.add('hidden');
+  $('learn-card').classList.remove('hidden');
+  $('prompt-msg').textContent = 'Look, listen, and say it aloud 👂';
+  $('learn-word').textContent = word;
+  const parts = syllabifySpanish(word);
+  $('learn-syllables').classList.toggle('hidden', !parts);
+  $('learn-syllables').textContent = parts ? parts.join(' · ') : '';
+  const stars = masteryFor(session.listId, word).stars;
+  $('word-mastery').textContent = `Mastery ${'★'.repeat(stars)}${'☆'.repeat(3 - stars)}`;
+  renderWordPic(word);
+  saveSession();
+  speak(word);
+}
+
+function finishLearnWord() {
+  session.current = null;
+  session.done++;
+  updateProgress();
+  setTimeout(nextWord, 150);
 }
 
 // Prefers the enriched AI picture over the built-in emoji; falls back to emoji
@@ -956,18 +1014,29 @@ function check() {
       res.scored = true;
     }
     chime(true);
+    const clean = session.tries === 0 && !res.revealed;
+    if (clean && !res.masteryRecorded) {
+      recordMastery(session.listId, word, true);
+      res.masteryRecorded = true;
+      session.cleanRun++;
+    }
     if (m === 'accents') flash(`¡Sí! Recuerda: ${word} ✨`, 'info');
-    else flash(pick(PRAISE) + ' ' + pick(['⭐', '🌟', '🎈', '🦜', '💚']), 'good');
+    else flash((MINI_STREAKS[session.cleanRun] || pick(PRAISE)) + ' ' + pick(['⭐', '🌟', '🎈', '🦜', '💚']), 'good');
     completeWord();
   } else {
     session.tries++;
     res.misses++;
+    session.cleanRun = 0;
+    if (!res.masteryRecorded) { recordMastery(session.listId, word, false); res.masteryRecorded = true; }
     if (res.firstTry === null) res.firstTry = false;
     chime(false);
     renderAttemptRow(raw, word);
     saveSession();
-    const left = 1 + data.settings.retries - session.tries;
-    if (left > 0) {
+    const left = session.kind === 'test' ? 0 : 1 + data.settings.retries - session.tries;
+    if (session.kind === 'test') {
+      flash('Guardada para repasar 💪', 'info');
+      completeWord();
+    } else if (left > 0) {
       $('prompt-msg').textContent = left === 1
         ? 'One more try — you can do it! 💪'
         : `Try again! (${left} tries left) 💪`;
@@ -985,17 +1054,19 @@ function finishSession() {
   const tricky = words.filter(w => session.results[w].misses > 0);
 
   const list = data.lists.find(l => l.id === session.listId);
-  if (list) list.lastResult = { perfect: perfect.length, total: words.length, at: Date.now() };
-  data.progress.totalPoints += session.pointsEarned;
-  updateStreak();
+  if (list && session.kind !== 'learn') list.lastResult = { perfect: perfect.length, total: words.length, at: Date.now() };
+  if (session.kind !== 'learn') {
+    data.progress.totalPoints += session.pointsEarned;
+    updateStreak();
+  }
   data.paused = null;   // finished — nothing to resume
   save();
 
-  $('done-title').textContent = tricky.length === 0 ? '¡Perfecto! 🌟' : '¡Lo lograste!';
+  $('done-title').textContent = session.kind === 'learn' ? '¡Lista para practicar! 🌟' : (tricky.length === 0 ? '¡Perfecto! 🌟' : '¡Lo lograste!');
   const stars = Math.max(1, Math.round(perfect.length / Math.max(1, words.length) * 5));
-  $('done-stars').textContent = '⭐'.repeat(stars) + '☆'.repeat(5 - stars);
-  $('done-summary').textContent = `${perfect.length} of ${words.length} words right on the first try`;
-  $('done-points').textContent = `⭐ +${session.pointsEarned} points · ${data.progress.totalPoints} total`
+  $('done-stars').textContent = session.kind === 'learn' ? '🌟' : '⭐'.repeat(stars) + '☆'.repeat(5 - stars);
+  $('done-summary').textContent = session.kind === 'learn' ? `You explored all ${words.length} words` : `${perfect.length} of ${words.length} words right on the first try`;
+  $('done-points').textContent = session.kind === 'learn' ? 'Now try Practice when you feel ready' : `⭐ +${session.pointsEarned} points · ${data.progress.totalPoints} total`
     + (data.progress.streak > 1 ? ` · 🔥 ${data.progress.streak}-day streak` : '');
 
   const box = $('tricky-box'), listEl = $('tricky-list');
@@ -1017,7 +1088,7 @@ function finishSession() {
   show('done');
   renderHome();
   confettiBurst();
-  speak(tricky.length === 0 ? '¡Perfecto! ¡Eres una estrella!' : '¡Muy bien! ¡Lo lograste!');
+  speak(session.kind === 'learn' ? '¡Muy bien! Ahora estás lista para practicar.' : (tricky.length === 0 ? '¡Perfecto! ¡Eres una estrella!' : '¡Muy bien! ¡Lo lograste!'));
 }
 
 /* ---------- confetti ---------- */
@@ -1087,8 +1158,12 @@ function applySettingsUI() {
 
 /* ---------- wire up ---------- */
 function init() {
-  $('btn-practice').addEventListener('click', () => startPractice(false));
-  $('btn-startover').addEventListener('click', () => startPractice(true));
+  $('btn-learn').addEventListener('click', () => startPractice(true, 'learn'));
+  $('btn-practice').addEventListener('click', () => startPractice(false, 'practice'));
+  $('btn-test').addEventListener('click', () => startPractice(true, 'test'));
+  $('btn-trouble').addEventListener('click', () => startPractice(true, 'trouble'));
+  $('btn-startover').addEventListener('click', () => startPractice(true, 'practice'));
+  $('btn-learn-next').addEventListener('click', finishLearnWord);
   $('btn-new-list').addEventListener('click', () => openEdit(null));
   $('btn-edit-active').addEventListener('click', () => activeList() && openEdit(activeList().id));
   $('btn-settings').addEventListener('click', () => { applySettingsUI(); show('settings'); });

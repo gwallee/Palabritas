@@ -84,6 +84,12 @@ body {
 }
 .text-btn.danger { color: var(--bad); }
 .row-btns { display: flex; justify-content: center; gap: 4px; }
+.mode-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 14px 0 8px; }
+.mode-btn { border: 0; border-radius: 18px; padding: 12px 5px; color: var(--ink); background: var(--card); box-shadow: var(--shadow); font: inherit; cursor: pointer; }
+.mode-btn span, .mode-btn b, .mode-btn small { display: block; }
+.mode-btn span { font-size: 1.55rem; }.mode-btn b { font-size: .95rem; }.mode-btn small { color: var(--muted); font-size: .65rem; line-height: 1.2; margin-top: 3px; }
+.mode-btn.learn { border-bottom: 4px solid var(--teal); }.mode-btn.practice { border-bottom: 4px solid var(--coral); }.mode-btn.test { border-bottom: 4px solid var(--violet); }
+.big-btn.trouble { background: linear-gradient(135deg, var(--sun), #F5A623); color: var(--ink); font-size: 1rem; padding: 12px; }
 
 .icon-btn {
   background: var(--card); border: none;
@@ -206,6 +212,11 @@ textarea { resize: vertical; min-height: 150px; }
   background: var(--card); box-shadow: var(--shadow);
 }
 .prompt-msg { text-align: center; color: var(--muted); font-weight: 600; margin: 10px 0 14px; }
+.learn-card { text-align: center; background: var(--card); padding: 20px; border-radius: 24px; box-shadow: var(--shadow); }
+.learn-word { color: var(--violet); font-size: 2.15rem; font-weight: 800; letter-spacing: 1px; }
+.syllables { font-size: 1.35rem; font-weight: 700; color: var(--teal-dark); margin: 8px 0; }
+.mastery-stars { color: var(--sun); letter-spacing: 3px; font-size: 1.25rem; margin: 7px 0; }
+.test-mode #word-pic, .test-mode #btn-slow, .test-mode #btn-sentence { display: none !important; }
 
 .reveal-box {
   text-align: center; background: var(--card); border-radius: 24px;

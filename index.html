@@ -41,7 +41,12 @@
       <div class="card-label">THIS WEEK</div>
       <h2 id="active-name"></h2>
       <p class="muted" id="active-count"></p>
-      <button class="big-btn primary" id="btn-practice">▶&nbsp;&nbsp;¡A practicar!</button>
+      <div class="mode-grid">
+        <button class="mode-btn learn" id="btn-learn"><span>👀</span><b>Learn</b><small>See, hear &amp; explore</small></button>
+        <button class="mode-btn practice" id="btn-practice"><span>✏️</span><b>Practice</b><small>Hints and extra tries</small></button>
+        <button class="mode-btn test" id="btn-test"><span>🎯</span><b>Test</b><small>One try, no hints</small></button>
+      </div>
+      <button class="big-btn trouble hidden" id="btn-trouble">💪 Practice Trouble Words <span id="trouble-count"></span></button>
       <button class="text-btn hidden" id="btn-startover">↺ Start over from the beginning</button>
       <div class="row-btns">
         <button class="text-btn" id="btn-edit-active">✏️ Edit words</button>
@@ -117,6 +122,13 @@
     </div>
 
     <p class="prompt-msg" id="prompt-msg">Listen… then spell it! 👂</p>
+
+    <div id="learn-card" class="learn-card hidden">
+      <div class="learn-word" id="learn-word"></div>
+      <div class="syllables hidden" id="learn-syllables"></div>
+      <div class="mastery-stars" id="word-mastery"></div>
+      <button class="big-btn primary" id="btn-learn-next">Next word →</button>
+    </div>
 
     <div id="reveal-box" class="reveal-box hidden">
       <div class="card-label">THE WORD IS</div>
@@ -210,6 +222,7 @@
 
 <canvas id="confetti"></canvas>
 <script src="./vendor/tesseract.min.js"></script>
+<script src="./syllables.js"></script>
 <script src="./app.js"></script>
 </body>
 </html>
