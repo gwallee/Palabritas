@@ -1,7 +1,7 @@
 'use strict';
 /* Palabritas — Spanish spelling practice PWA */
 
-const APP_VERSION = '1.7.0';
+const APP_VERSION = '1.8.0';
 
 /* ---------- helpers ---------- */
 const $ = id => document.getElementById(id);
@@ -152,7 +152,7 @@ function chime(good) {
 
 /* ---------- views ---------- */
 function show(name) {
-  ['home', 'edit', 'practice', 'done', 'settings'].forEach(v =>
+  ['home', 'edit', 'practice', 'hangman', 'done', 'settings'].forEach(v =>
     $('view-' + v).classList.toggle('hidden', v !== name));
   if (name !== 'edit') releaseOcr();   // free OCR memory when leaving the editor
   window.scrollTo(0, 0);
@@ -733,16 +733,18 @@ const SENTENCE_FRAMES = [
   'En la escuela aprendimos la palabra {w}.',
 ];
 
-// Per-word enrichment ({ emoji, sentence }) from the practice list, if any.
-function wordExtra(word) {
-  if (!session) return null;
-  const list = data.lists.find(l => l.id === session.listId);
+// Per-word enrichment ({ emoji, sentence, image }) — defaults to the practice
+// session's list; hangman passes its own listId explicitly.
+function wordExtra(word, listId) {
+  const sid = listId || (session && session.listId);
+  if (!sid) return null;
+  const list = data.lists.find(l => l.id === sid);
   const extras = list && list.extras;
   return (extras && extras[canon(word)]) || null;
 }
 
-function speakSentence(word) {
-  const ex = wordExtra(word);
+function speakSentence(word, listId) {
+  const ex = wordExtra(word, listId);
   if (ex && ex.sentence) { speak(ex.sentence, 0.92); return; }
   speak(pick(SENTENCE_FRAMES).replace('{w}', word), 0.95);
 }
@@ -901,9 +903,9 @@ function finishLearnWord() {
 
 // Prefers the enriched AI picture over the built-in emoji; falls back to emoji
 // if the image never loads (e.g. offline and never cached on this device).
-function renderWordPic(word) {
-  const pic = $('word-pic');
-  const ex = wordExtra(word);
+function renderWordPic(word, el, listId) {
+  const pic = el || $('word-pic');
+  const ex = wordExtra(word, listId);
   const emoji = (ex && ex.emoji) || emojiFor(word);
   if (ex && ex.image) {
     pic.innerHTML = '';
@@ -1091,6 +1093,195 @@ function finishSession() {
   speak(session.kind === 'learn' ? '¡Muy bien! Ahora estás lista para practicar.' : (tricky.length === 0 ? '¡Perfecto! ¡Eres una estrella!' : '¡Muy bien! ¡Lo lograste!'));
 }
 
+/* ---------- hangman ---------- */
+// Spelling hangman: the word is SPOKEN (never shown), and she builds it letter
+// by letter before the little guy is fully drawn. Same leniency rules as
+// typing practice: accents fold (guessing A reveals á) but ñ is its own key.
+// One letter is revealed free at the start; hidden letters show as underlines.
+// Points bank immediately per rescue; mastery/trouble/streak are practice-only.
+const H_ROWS = ['abcdefghi', 'jklmnñopq', 'rstuvwxyz'];
+const H_MAX_WRONG = 6;
+const H_POINTS_PER_WIN = 5;
+let hSession = null;
+
+const hKey = ch => (ch === 'ñ' ? 'ñ' : stripAll(ch));
+
+function startHangman() {
+  const list = activeList();
+  if (!list || !list.words.length) return;
+  hSession = {
+    listId: list.id,
+    queue: shuffle(list.words),
+    current: null,
+    chars: [],
+    revealed: [],
+    guessed: {},           // letter -> 'hit' | 'miss'
+    wrong: 0,
+    played: 0,
+    solved: 0,
+    requeued: new Set(),
+    points: 0,
+    over: false,           // current word finished (win or loss), awaiting next
+  };
+  $('h-play').classList.remove('hidden');
+  $('h-done').classList.add('hidden');
+  show('hangman');
+  hNextWord();
+}
+
+function hUpdateProgress() {
+  const remaining = hSession.queue.length + (hSession.current ? 1 : 0);
+  const total = hSession.played + remaining;
+  $('h-progress-text').textContent = `🎈 ${hSession.played} done · ${remaining} to go`;
+  $('h-progress-fill').style.width = total ? (hSession.played / total * 100) + '%' : '0%';
+}
+
+function hNextWord() {
+  if (!hSession) return;   // quit while the next-word timer was pending
+  if (!hSession.queue.length) { hFinish(); return; }
+  const word = hSession.queue.shift();
+  hSession.current = word;
+  hSession.chars = canon(word).split('');
+  // spaces and any non-letter characters start revealed — structure, not spelling
+  hSession.revealed = hSession.chars.map(c => !/^[a-zñ]$/.test(hKey(c)));
+  hSession.guessed = {};
+  hSession.wrong = 0;
+  hSession.over = false;
+  // gift one starter letter (all its spots) when the word has letters to spare
+  const distinct = [...new Set(hSession.chars.filter((c, i) => !hSession.revealed[i]).map(hKey))];
+  let gift = null;
+  if (distinct.length >= 3) {
+    gift = pick(distinct);
+    hSession.chars.forEach((c, i) => { if (hKey(c) === gift) hSession.revealed[i] = true; });
+    hSession.guessed[gift] = 'hit';
+  }
+  hUpdateProgress();
+  $('h-msg').textContent = gift
+    ? `Free letter: ${gift.toUpperCase()} 🎁 Listen and find the rest!`
+    : 'Listen… which letters does it have? 👂';
+  renderWordPic(word, $('h-word-pic'), hSession.listId);
+  hDraw();
+  hRenderTiles(false);
+  hRenderKeys();
+  speak(word);
+}
+
+function hDraw() {
+  for (let i = 1; i <= H_MAX_WRONG; i++)
+    $('h-part-' + i).classList.toggle('hidden', i > hSession.wrong);
+}
+
+function hRenderTiles(showAll) {
+  const box = $('h-tiles');
+  box.innerHTML = '';
+  hSession.chars.forEach((c, i) => {
+    const tile = document.createElement('div');
+    tile.className = 'tile';
+    if (c === ' ') {
+      tile.classList.add('space');
+    } else if (hSession.revealed[i]) {
+      tile.textContent = c;
+      tile.classList.add('good');
+    } else if (showAll) {
+      tile.textContent = c;      // the letters she didn't find, shown on a loss
+      tile.classList.add('bad');
+    } else {
+      tile.classList.add('missing');   // empty underline
+    }
+    box.appendChild(tile);
+  });
+}
+
+function hRenderKeys() {
+  const box = $('h-keys');
+  box.innerHTML = '';
+  H_ROWS.forEach(row => {
+    const r = document.createElement('div');
+    r.className = 'h-krow';
+    row.split('').forEach(ch => {
+      const b = document.createElement('button');
+      b.className = 'h-key';
+      b.textContent = ch;
+      const st = hSession.guessed[ch];
+      if (st) b.classList.add(st);
+      if (st || hSession.over) b.disabled = true;
+      b.addEventListener('click', () => hGuess(ch));
+      r.appendChild(b);
+    });
+    box.appendChild(r);
+  });
+}
+
+function hGuess(ch) {
+  if (!hSession || hSession.over || hSession.guessed[ch]) return;
+  let hit = false;
+  hSession.chars.forEach((c, i) => {
+    if (!hSession.revealed[i] && hKey(c) === ch) {
+      hSession.revealed[i] = true;
+      hit = true;
+    }
+  });
+  hSession.guessed[ch] = hit ? 'hit' : 'miss';
+  if (hit) {
+    chime(true);
+    hRenderTiles(false);
+    if (hSession.revealed.every(Boolean)) { hWordDone(true); return; }
+    $('h-msg').textContent = pick(['¡Sí! 🎉', '¡Eso es! ⭐', '¡Bien! 🦜', '¡Genial! 💚']);
+  } else {
+    hSession.wrong++;
+    chime(false);
+    hDraw();
+    const left = H_MAX_WRONG - hSession.wrong;
+    if (left <= 0) { hWordDone(false); return; }
+    $('h-msg').textContent = left === 1
+      ? '¡Cuidado! Only 1 miss left 😬'
+      : `No ${ch.toUpperCase()} in this word… ${left} misses left`;
+  }
+  hRenderKeys();
+}
+
+function hWordDone(win) {
+  const word = hSession.current;
+  hSession.over = true;
+  hSession.played++;
+  hSession.current = null;
+  hRenderKeys();
+  if (win) {
+    hSession.solved++;
+    hSession.points += H_POINTS_PER_WIN;
+    data.progress.totalPoints += H_POINTS_PER_WIN;   // banked right away — quitting keeps them
+    save();
+    chime(true);
+    hRenderTiles(false);
+    $('h-msg').textContent = `${pick(PRAISE)} ⭐ +${H_POINTS_PER_WIN} points`;
+    speak(pick(PRAISE));
+  } else {
+    hRenderTiles(true);
+    $('h-msg').textContent = `The word was “${word}” — it'll come back! 💪`;
+    speak(word);
+    if (!hSession.requeued.has(word)) {   // one more chance at the end of the round
+      hSession.requeued.add(word);
+      hSession.queue.push(word);
+    }
+  }
+  hUpdateProgress();
+  setTimeout(hNextWord, win ? 1600 : 2600);
+}
+
+function hFinish() {
+  const s = hSession;
+  const perfect = s.solved === s.played && s.played > 0;
+  $('h-play').classList.add('hidden');
+  $('h-done').classList.remove('hidden');
+  $('h-done-emoji').textContent = perfect ? '🌟' : '🎈';
+  $('h-done-title').textContent = perfect ? '¡Increíble!' : '¡Juego terminado!';
+  $('h-done-summary').textContent = `You rescued the little guy ${s.solved} of ${s.played} times`;
+  $('h-done-points').textContent = `⭐ +${s.points} points · ${data.progress.totalPoints} total`;
+  renderHome();
+  if (s.solved > 0) confettiBurst();
+  speak(perfect ? '¡Increíble! ¡Eres una estrella!' : '¡Muy bien! ¡Qué divertido!');
+}
+
 /* ---------- confetti ---------- */
 function confettiBurst() {
   const canvas = $('confetti');
@@ -1221,6 +1412,19 @@ function init() {
 
   $('btn-again').addEventListener('click', () => startPractice(true));
   $('btn-done-home').addEventListener('click', () => { renderHome(); show('home'); });
+
+  $('btn-hangman').addEventListener('click', startHangman);
+  $('h-quit').addEventListener('click', () => {
+    if (hasSpeech) try { speechSynthesis.cancel(); } catch (e) {}
+    hSession = null;
+    renderHome();
+    show('home');
+  });
+  $('h-say').addEventListener('click', () => hSession && hSession.current && speak(hSession.current));
+  $('h-slow').addEventListener('click', () => hSession && hSession.current && speak(hSession.current, 0.55));
+  $('h-sentence').addEventListener('click', () => hSession && hSession.current && speakSentence(hSession.current, hSession.listId));
+  $('h-again').addEventListener('click', startHangman);
+  $('h-home').addEventListener('click', () => { hSession = null; renderHome(); show('home'); });
 
   $('btn-settings-back').addEventListener('click', () => { renderHome(); show('home'); });
   $('voice-select').addEventListener('change', e => { data.settings.voiceURI = e.target.value; save(); });

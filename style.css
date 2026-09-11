@@ -270,6 +270,45 @@ textarea { resize: vertical; min-height: 150px; }
 .result-flash.info { color: var(--almost); font-size: 1.1rem; }
 @keyframes pop { 0% { transform: scale(.5); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
 
+/* ---------- hangman ---------- */
+.h-top { display: flex; align-items: center; justify-content: center; gap: 14px; margin-top: 4px; }
+#h-figure { width: 148px; height: 172px; flex: none; }
+#h-figure line, #h-figure path, #h-figure circle {
+  fill: none; stroke-linecap: round; stroke-linejoin: round;
+}
+#h-figure .h-gallows line { stroke: #D8CDBB; stroke-width: 6; }
+.h-part line, .h-part circle, .h-part path { stroke: var(--violet); stroke-width: 5; }
+.h-part circle:first-child { fill: #fff; }
+.h-part .h-eye { fill: var(--violet); stroke: none; }
+.h-part .h-mouth { stroke-width: 2.5; }
+.h-side { display: flex; flex-direction: column; align-items: center; gap: 10px; min-width: 108px; }
+.h-side .word-pic { margin: 0; font-size: 46px; min-height: 0; }
+.h-side .word-pic img { width: 88px; height: 88px; border-radius: 18px; }
+.h-speak { display: flex; gap: 8px; }
+.h-speak .speak-btn.small { width: 52px; height: 52px; border-radius: 18px; font-size: 24px; }
+/* word blanks: classic hangman underlines */
+.h-tiles { display: flex; flex-wrap: wrap; gap: 7px; justify-content: center; margin: 2px 0 16px; }
+.h-tiles .tile {
+  width: 28px; height: 42px; font-size: 1.35rem; border-radius: 0;
+  background: none; border: none; border-bottom: 3px solid #C9BBA4;
+}
+.h-tiles .tile.good { color: var(--ink); border-bottom-color: var(--good); }
+.h-tiles .tile.bad { color: var(--bad); border-bottom-color: var(--bad); }
+.h-tiles .tile.space { border: none; width: 12px; }
+.h-keys { display: flex; flex-direction: column; gap: 7px; }
+.h-krow { display: flex; justify-content: center; gap: 6px; }
+.h-key {
+  flex: 1; max-width: 44px; height: 48px; border: none; border-radius: 12px;
+  background: var(--card); box-shadow: var(--shadow);
+  font: inherit; font-size: 1.15rem; font-weight: 800; color: var(--ink);
+  cursor: pointer; padding: 0;
+  transition: transform .06s ease;
+}
+.h-key:active { transform: scale(.9); }
+.h-key.hit { background: var(--good-bg); color: var(--good); box-shadow: none; }
+.h-key.miss { background: var(--bad-bg); color: var(--bad); box-shadow: none; opacity: .65; }
+.h-key:disabled { cursor: default; }
+
 /* ---------- done ---------- */
 .done-inner { text-align: center; padding-top: 40px; }
 .done-emoji { font-size: 74px; animation: pop .5s ease; }

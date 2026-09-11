@@ -160,6 +160,24 @@ backend; word lists and scores live in each device's localStorage.
   es-US → es-419 → any es. iOS tip for the parents: download "Paulina (Enhanced)" under
   Settings → Accessibility → Spoken Content → Voices → Spanish.
 
+## Hangman (v1.8, 🎈 button on the home card)
+
+- **Spelling** hangman: the word is spoken (🔊/🐢/💬 + picture hint, same as practice),
+  never shown — she taps letters on a 27-key alphabetical keyboard (a–z + ñ) to fill
+  underline blanks before the figure completes (6 wrong misses; SVG parts `h-part-1..6`).
+- Letter matching via `hKey()`: accents fold (A reveals á, U reveals ü) but **ñ is its own
+  key** — guessing N never reveals ñ. Spaces/punctuation start revealed. One **free starter
+  letter** (all its positions, keyboard key pre-marked green) whenever the word has ≥3
+  distinct guessable letters (Brian asked for this).
+- +5 points per rescued word (`H_POINTS_PER_WIN`), banked into `progress.totalPoints`
+  immediately so quitting keeps them. A lost word re-queues once at the end of the round
+  and its letters are shown in red. **Deliberately does NOT touch** mastery, trouble
+  words, streaks, or `paused` — those are practice-mode concepts; hangman state
+  (`hSession`) is in-memory only and not resumable.
+- Code: `/* ---------- hangman ---------- */` section in app.js; view `view-hangman` with
+  in-view end panel (`h-done`), not the shared done view. `wordExtra`/`renderWordPic`/
+  `speakSentence` take optional listId/element args so both modes share them.
+
 ## Deploying
 
 GitHub Pages serves the **gh-pages** branch (auto-enabled by pushing it; there is no local
@@ -194,8 +212,10 @@ git push origin main && git push origin main:gh-pages
   v1.6.0: points (10/8/5 by try) + streaks, per-device only by explicit
   choice — no accounts/backend exist to sync them; self-serve 🎨 Generate pictures
   button (Pollinations.ai AI illustrations, staged as URLs, no Claude round-trip).
-- v1.7.0 (feature branch): Learn/Test modes, Trouble Words, per-word mastery,
-  conservative Spanish syllabification, richer praise, and mini-streak celebrations.
+- v1.7.0: Learn/Test modes, Trouble Words, per-word mastery, conservative Spanish
+  syllabification, richer praise, and mini-streak celebrations (built on the
+  feature/v1.7-learning-upgrades branch; backup/v1.6-before-learning-upgrades preserved).
+  v1.8.0 (current): 🎈 spelling hangman with free starter letter and underline blanks.
 - `lists.json` is committed empty (`[]`) — no AI/test lists were ever deployed; a "Cloud
   Test List" existed only inside a local test browser during development.
 - **Removed by Brian's request (2026-08-24, "that was an accident"):** an uncommitted
