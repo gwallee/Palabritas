@@ -215,7 +215,12 @@ git push origin main && git push origin main:gh-pages
 - v1.7.0: Learn/Test modes, Trouble Words, per-word mastery, conservative Spanish
   syllabification, richer praise, and mini-streak celebrations (built on the
   feature/v1.7-learning-upgrades branch; backup/v1.6-before-learning-upgrades preserved).
-  v1.8.0 (current): 🎈 spelling hangman with free starter letter and underline blanks.
+  v1.8.0: 🎈 spelling hangman with free starter letter and underline blanks.
+  v1.8.1 (current): `chime()` upgraded to a bright bell "ding" (right) and a soft
+  two-note falling "uh-oh" (wrong), used by practice and hangman. Brian explicitly
+  preferred SOUNDS over spoken letter feedback ("a ding for good") — spoken letter
+  names ("¡Sí, la eme!") were built and then removed at his direction; offer them
+  only as an optional toggle if he asks again.
 - `lists.json` is committed empty (`[]`) — no AI/test lists were ever deployed; a "Cloud
   Test List" existed only inside a local test browser during development.
 - **Removed by Brian's request (2026-08-24, "that was an accident"):** an uncommitted

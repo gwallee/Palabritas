@@ -1,7 +1,7 @@
 'use strict';
 /* Palabritas — Spanish spelling practice PWA */
 
-const APP_VERSION = '1.8.0';
+const APP_VERSION = '1.8.1';
 
 /* ---------- helpers ---------- */
 const $ = id => document.getElementById(id);
@@ -130,23 +130,32 @@ function updateVoiceBanner() {
 }
 
 /* ---------- sounds ---------- */
+// A clear bell "ding!" for right and a soft descending "uh-oh" for wrong —
+// distinct enough to register without looking at the screen.
 let audioCtx = null;
 function chime(good) {
   try {
     audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
     if (audioCtx.state === 'suspended') audioCtx.resume();
-    const notes = good ? [523.25, 783.99] : [220];
-    notes.forEach((f, i) => {
+    const t0 = audioCtx.currentTime;
+    const tone = (freq, start, dur, vol, type = 'sine') => {
       const o = audioCtx.createOscillator(), g = audioCtx.createGain();
-      o.type = 'sine';
-      o.frequency.value = f;
-      const t = audioCtx.currentTime + i * 0.09;
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(good ? 0.12 : 0.07, t + 0.02);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.25);
+      o.type = type;
+      o.frequency.value = freq;
+      g.gain.setValueAtTime(0.0001, t0 + start);
+      g.gain.exponentialRampToValueAtTime(vol, t0 + start + 0.015);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + start + dur);
       o.connect(g); g.connect(audioCtx.destination);
-      o.start(t); o.stop(t + 0.3);
-    });
+      o.start(t0 + start); o.stop(t0 + start + dur + 0.05);
+    };
+    if (good) {   // bell strike + octave shimmer
+      tone(1046.5, 0, 0.6, 0.22);
+      tone(1568, 0.045, 0.5, 0.12);
+      tone(2093, 0.045, 0.3, 0.05);
+    } else {      // two gentle falling notes
+      tone(233, 0, 0.18, 0.13, 'triangle');
+      tone(175, 0.16, 0.32, 0.13, 'triangle');
+    }
   } catch (e) {}
 }
 
