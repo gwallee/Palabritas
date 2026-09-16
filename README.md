@@ -8,10 +8,9 @@ Everything is stored **on the device** (localStorage) — no accounts, no server
 
 ## How it works
 
-- **Add the week's words:** tap *New word list* → **📷 Scan a photo of the list** (embedded
-  Tesseract OCR, Spanish-trained, runs on-device and offline). Review the parsed word chips,
-  remove any strays, save. Typing/pasting works too, and iOS's own keyboard "Scan Text" is a
-  bonus path where available.
+- **Add the week's words:** tap *New word list* and type or paste them — or tap the words
+  box and use the iPhone keyboard's own **Scan Text** to read them off the printed sheet.
+  Review the parsed word chips, remove any strays, save.
 - **Two phones, one list:** on the home screen tap **📤 Share list** and text it to the other
   phone — there, *New word list* → paste. Or add lists to `lists.json` in this repo
   (`[{ "id": "2026-08-31", "name": "Week of Aug 31", "words": ["gato", "..."] }]`, newest first):

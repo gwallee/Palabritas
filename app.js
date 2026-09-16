@@ -1,7 +1,7 @@
 'use strict';
 /* Palabritas — Spanish spelling practice PWA */
 
-const APP_VERSION = '1.8.1';
+const APP_VERSION = '1.8.2';
 
 /* ---------- helpers ---------- */
 const $ = id => document.getElementById(id);
@@ -163,7 +163,6 @@ function chime(good) {
 function show(name) {
   ['home', 'edit', 'practice', 'hangman', 'done', 'settings'].forEach(v =>
     $('view-' + v).classList.toggle('hidden', v !== name));
-  if (name !== 'edit') releaseOcr();   // free OCR memory when leaving the editor
   window.scrollTo(0, 0);
 }
 
@@ -246,7 +245,7 @@ function parseWords(text) {
       .replace(/[.,;:!?¡¿"“”'']+\s*$/g, '')            // trailing punctuation
       .trim().replace(/\s+/g, ' ');
     if (!w) return;
-    // OCR/typing noise filters: needs at least 2 letters, no digits, sane length
+    // typing/paste noise filters: needs at least 2 letters, no digits, sane length
     if (w.replace(/[^\p{L}]/gu, '').length < 2) return;
     if (/\d/.test(w)) return;
     if (w.length > 40) return;
@@ -256,83 +255,6 @@ function parseWords(text) {
     out.push(w);
   });
   return out;
-}
-
-/* ---------- photo scan (on-device OCR) ---------- */
-let ocrWorker = null;
-
-async function getOcrWorker() {
-  if (ocrWorker) return ocrWorker;
-  const base = new URL('.', location.href).href;
-  ocrWorker = await Tesseract.createWorker('spa', 1, {
-    workerPath: base + 'vendor/worker.min.js',
-    corePath: base + 'vendor/core',
-    langPath: base + 'vendor/lang',
-    gzip: true,
-    workerBlobURL: false,
-    logger: m => {
-      if (m.status === 'recognizing text') setScanProgress('Reading the words…', 0.2 + m.progress * 0.8);
-    },
-  });
-  return ocrWorker;
-}
-
-function releaseOcr() {
-  if (ocrWorker) {
-    try { ocrWorker.terminate(); } catch (e) {}
-    ocrWorker = null;
-  }
-  $('scan-progress').classList.add('hidden');
-}
-
-function setScanProgress(text, frac) {
-  $('scan-progress').classList.remove('hidden');
-  $('scan-status').textContent = text;
-  $('scan-fill').style.width = Math.round(Math.max(0, Math.min(1, frac || 0)) * 100) + '%';
-}
-
-// Draw the photo onto a canvas (downscaled) so EXIF rotation is applied and OCR is fast.
-async function photoToCanvas(file) {
-  const url = URL.createObjectURL(file);
-  try {
-    const img = new Image();
-    img.src = url;
-    await img.decode();
-    const scale = Math.min(1, 1700 / Math.max(img.naturalWidth, img.naturalHeight));
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
-    canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
-    canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-    return canvas;
-  } finally {
-    URL.revokeObjectURL(url);
-  }
-}
-
-async function scanPhoto(file) {
-  const btn = $('btn-scan');
-  btn.disabled = true;
-  try {
-    setScanProgress('Warming up the scanner…', 0.05);
-    const canvas = await photoToCanvas(file);
-    const worker = await getOcrWorker();
-    setScanProgress('Reading the words…', 0.2);
-    const { data } = await worker.recognize(canvas);
-    const found = parseWords(data.text || '');
-    if (!found.length) {
-      setScanProgress('No words found — try a closer, straight-on photo in good light.', 0);
-    } else {
-      const existing = $('words-input').value.trim();
-      $('words-input').value = (existing ? existing + '\n' : '') + found.join('\n');
-      renderChips();
-      setScanProgress(`Found ${found.length} word${found.length === 1 ? '' : 's'} — check them and remove any strays.`, 1);
-    }
-  } catch (err) {
-    setScanProgress("Scanning didn't work — you can still type or paste the words.", 0);
-    releaseOcr();
-  } finally {
-    btn.disabled = false;
-  }
 }
 
 /* ---------- picture generation (self-serve AI illustrations) ---------- */
@@ -424,7 +346,6 @@ function openEdit(listId) {
   $('list-name').value = list ? list.name : defaultListName();
   $('words-input').value = list ? list.words.join('\n') : '';
   $('btn-delete-list').classList.toggle('hidden', !list);
-  $('scan-progress').classList.add('hidden');
   $('gen-progress').classList.add('hidden');
   editingExtras = {};
   if (list && list.extras) {
@@ -1378,18 +1299,6 @@ function init() {
   $('btn-delete-list').addEventListener('click', deleteList);
   $('btn-share-active').addEventListener('click', shareActiveList);
   $('btn-cloud-save').addEventListener('click', cloudSaveActiveList);
-  $('btn-scan').addEventListener('click', () => {
-    if (typeof Tesseract === 'undefined') {
-      alert('The scanner needs its one-time download — open the app once with internet, then try again.');
-      return;
-    }
-    $('scan-file').click();
-  });
-  $('scan-file').addEventListener('change', e => {
-    const f = e.target.files && e.target.files[0];
-    if (f) scanPhoto(f);
-    e.target.value = '';
-  });
   $('btn-gen-images').addEventListener('click', generateImages);
   $('btn-sentence').addEventListener('click', () => session && session.current && speakSentence(session.current));
 

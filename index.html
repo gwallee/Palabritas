@@ -76,15 +76,10 @@
     <label class="field-label" for="list-name">List name</label>
     <input id="list-name" class="text-field" type="text" autocomplete="off">
 
-    <button class="big-btn secondary slim" id="btn-scan">📷 Scan a photo of the list</button>
-    <input type="file" id="scan-file" accept="image/*" hidden>
-    <div class="scan-progress hidden" id="scan-progress">
-      <div class="muted small" id="scan-status">Starting…</div>
-      <div class="progress-bar"><div class="progress-fill" id="scan-fill"></div></div>
-    </div>
     <div class="scan-hint">
-      💡 Snap the printed sheet straight-on in good light — then check the words it
-      found and remove any strays. You can always type or paste words too.
+      💡 To copy a printed list: tap the words box below, then choose <b>Scan Text</b> on the
+      iPhone keyboard and point the camera at the sheet. Typing or pasting works too — check
+      the words underneath and remove any strays.
     </div>
 
     <label class="field-label" for="words-input">Words <span class="muted">(one per line)</span></label>
@@ -278,7 +273,6 @@
 </div>
 
 <canvas id="confetti"></canvas>
-<script src="./vendor/tesseract.min.js"></script>
 <script src="./syllables.js"></script>
 <script src="./app.js"></script>
 </body>

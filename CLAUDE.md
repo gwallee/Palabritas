@@ -6,7 +6,7 @@ backend; word lists and scores live in each device's localStorage.
 
 - **Live app:** https://gwallee.github.io/Palabritas/
 - **Repo:** https://github.com/gwallee/Palabritas (public)
-- **Stack:** vanilla HTML/CSS/JS, no build step, no dependencies beyond vendored Tesseract.
+- **Stack:** vanilla HTML/CSS/JS, no build step, no dependencies, nothing vendored.
 
 ## Hard requirements (from Brian)
 
@@ -17,26 +17,22 @@ backend; word lists and scores live in each device's localStorage.
   right (green), accent-only wrong (yellow), or wrong (red) — without revealing the answer.
 - Accent-lenient matching by default ("arbol" ≈ "árbol", correction shown; strict toggle in
   settings) but **ñ is always a distinct letter from n** — never lenient.
-- Word entry by photo (in-app OCR) or typing.
+- Word entry by typing/pasting (iOS keyboard "Scan Text" covers the printed sheet).
 
 ## File map
 
 - `index.html` — all views in one page: home, edit (list editor), practice, done, settings.
-- `app.js` — everything: storage, parser, speech, practice loop, OCR, emoji hints, share,
+- `app.js` — everything: storage, parser, speech, practice loop, emoji hints, share,
   cloud sync, session resume. Read top-to-bottom; sections are comment-labeled.
 - `style.css` — warm kid-friendly theme, big touch targets.
 - `sw.js` — service worker. `CACHE = 'palabritas-vN'`: **bump N on every deploy that
-  changes any cached file** (that's the only cache-busting mechanism). Precaches ~14 files
-  including the OCR stack (~8.8 MB). `lists.json` is network-first; everything else is
+  changes any cached file** (that's the only cache-busting mechanism). Precaches the 10
+  app files (~100 KB since the OCR stack went). `lists.json` is network-first; everything else is
   cache-first with background refresh (so code changes reach an installed phone on the
   *second* open — this lag is normal, remember it when testing too). Cross-origin
   `image.pollinations.ai` requests (AI word pictures) get their own cache-first runtime
   caching branch, checked before the same-origin-only guard.
 - `lists.json` — the shared word-list feed (see below). Currently `[]`.
-- `vendor/` — tesseract.js 5.1.1 (`tesseract.min.js`, `worker.min.js`),
-  `core/` = only the two **lstm** wasm.js builds (simd + non-simd; oem is pinned to 1 —
-  if you ever change oem, you must vendor more core files), `lang/spa.traineddata.gz` =
-  tessdata_fast 4.0.0 Spanish.
 - `dev-server.mjs` + `.claude/launch.json` (server name `palabritas`) — local static server
   for testing in the Claude Code browser pane.
 - `manifest.webmanifest`, icons — PWA install metadata.
@@ -62,14 +58,16 @@ backend; word lists and scores live in each device's localStorage.
 
 ## Word entry
 
-- **📷 Scan a photo** button → hidden `<input type=file accept=image/*>` → downscale to
-  ≤1700 px on canvas (EXIF-safe via `<img>.decode()`) → Tesseract (`spa`, oem 1,
-  `workerBlobURL:false`, absolute worker/core/lang URLs) → text through `parseWords`.
+- Type or paste words into the words box; on iOS the keyboard's own **Scan Text** reads a
+  printed sheet straight into it. The list editor's hint box points at it.
 - `parseWords` rules: split on newlines/commas/etc, strip leading list numbering, require
-  ≥2 letters, reject anything with a digit (OCR noise), cap 40 chars, skip lines starting
-  with 📚, dedupe accent-insensitively (ñ preserved). Chips UI lets the parent prune strays.
-- iOS keyboard "Scan Text" still works as a bonus path but is NOT relied on (it proved
-  too hidden/unavailable — that's why OCR is embedded).
+  ≥2 letters, reject anything with a digit (stray noise), cap 40 chars, skip lines starting
+  with 📚, dedupe accent-insensitively (ñ preserved). Chips UI (live, under the box) lets
+  the parent prune strays.
+- **In-app photo OCR was removed in v1.8.2** at Brian's request — the 📷 Scan a photo button
+  never worked reliably for him and the keyboard's Scan Text does. The vendored Tesseract
+  stack (~8.8 MB) went with it. Do NOT re-add without an explicit ask; the old code is in
+  git history before the v1.8.2 commit.
 
 ## Word pictures (AI illustrations)
 
@@ -81,8 +79,8 @@ backend; word lists and scores live in each device's localStorage.
   ~2.5s gap between words — the free tier allows only 1 request at a time.
 - Generated pictures render live in a small grid below the button; tap ✕ on any one to
   discard it and fall back to the emoji hint instead (there's no client-side way to
-  auto-judge image quality, so this is the review step — mirrors how OCR chips can be
-  pruned).
+  auto-judge image quality, so this is the review step — mirrors how the word chips can
+  be pruned).
 - On **Save list**, staged images merge into `list.extras` (preserving any existing
   `emoji`/`sentence` from cloud enrichment — see below). On **☁️ Save to cloud**,
   `extras` (images included) rides along in the same prefilled-GitHub-commit JSON, so
@@ -90,8 +88,8 @@ backend; word lists and scores live in each device's localStorage.
 - Practice screen (`renderWordPic` in app.js) prefers `extra.image` over
   `extra.emoji`/`WORD_EMOJI` when present, with an `<img onerror>` fallback to emoji if
   the image fails to load.
-- **This is a live external dependency**, unlike everything else in this app (which is
-  deliberately self-hosted/vendored — see the Tesseract setup). Offline reliability
+- **This is the app's only external dependency** — everything else is self-hosted.
+  Offline reliability
   after the first load depends on the service worker's runtime cache for
   `image.pollinations.ai` (sw.js) — an image never seen before while online just isn't
   cached, and falls back to emoji when offline. This tradeoff was discussed with Brian
@@ -204,7 +202,8 @@ git push origin main && git push origin main:gh-pages
 
 ## State / history
 
-- v1.0.0: core app. v1.1.0: embedded OCR, emoji hints, sentences, share + lists.json sync.
+- v1.0.0: core app. v1.1.0: embedded OCR (removed in v1.8.2), emoji hints, sentences,
+  share + lists.json sync.
   v1.2.0: practice-session resume. v1.3.0: lists.json fetched from raw main, SW precache
   uses no-cache requests. v1.4.0: ☁️ Save to cloud (token-free, prefilled GitHub commit
   page) + per-file `lists/` store with sha-based sync. v1.5.0: per-word extras (emoji +
@@ -216,11 +215,14 @@ git push origin main && git push origin main:gh-pages
   syllabification, richer praise, and mini-streak celebrations (built on the
   feature/v1.7-learning-upgrades branch; backup/v1.6-before-learning-upgrades preserved).
   v1.8.0: 🎈 spelling hangman with free starter letter and underline blanks.
-  v1.8.1 (current): `chime()` upgraded to a bright bell "ding" (right) and a soft
+  v1.8.1: `chime()` upgraded to a bright bell "ding" (right) and a soft
   two-note falling "uh-oh" (wrong), used by practice and hangman. Brian explicitly
   preferred SOUNDS over spoken letter feedback ("a ding for good") — spoken letter
   names ("¡Sí, la eme!") were built and then removed at his direction; offer them
   only as an optional toggle if he asks again.
+  v1.8.2 (current): 📷 Scan a photo (in-app Tesseract OCR) removed at Brian's request
+  (2026-09-16, "it doesn't seem to work" — the iOS keyboard's Scan Text does); `vendor/`
+  deleted, SW precache down from ~8.8 MB to ~100 KB.
 - `lists.json` is committed empty (`[]`) — no AI/test lists were ever deployed; a "Cloud
   Test List" existed only inside a local test browser during development.
 - **Removed by Brian's request (2026-08-24, "that was an accident"):** an uncommitted

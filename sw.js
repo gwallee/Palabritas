@@ -1,5 +1,5 @@
 /* Palabritas service worker — makes the app work fully offline */
-const CACHE = 'palabritas-v10';
+const CACHE = 'palabritas-v11';
 const ASSETS = [
   './',
   './index.html',
@@ -11,11 +11,6 @@ const ASSETS = [
   './icon-512.png',
   './apple-touch-icon.png',
   './lists.json',
-  './vendor/tesseract.min.js',
-  './vendor/worker.min.js',
-  './vendor/core/tesseract-core-simd-lstm.wasm.js',
-  './vendor/core/tesseract-core-lstm.wasm.js',
-  './vendor/lang/spa.traineddata.gz',
 ];
 
 self.addEventListener('install', e => {
