@@ -1,5 +1,5 @@
 /* Palabritas service worker — makes the app work fully offline */
-const CACHE = 'palabritas-v11';
+const CACHE = 'palabritas-v12';
 const ASSETS = [
   './',
   './index.html',

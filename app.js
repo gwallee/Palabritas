@@ -76,6 +76,14 @@ function matches(attempt, target) {
 let voices = [];
 const hasSpeech = 'speechSynthesis' in window;
 
+// iOS runs web audio in the "ambient" session, which the hardware
+// ring/silent switch mutes entirely — a phone on silent plays nothing.
+// 'playback' is the category that keeps sounding regardless.
+// Safari 16.4+; harmless where navigator.audioSession doesn't exist.
+function audioSessionPlayback() {
+  try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
+}
+
 function spanishVoices() {
   return voices.filter(v => (v.lang || '').toLowerCase().replace('_', '-').startsWith('es'));
 }
@@ -96,6 +104,7 @@ function pickVoice() {
 
 function speak(text, rateMul = 1) {
   if (!hasSpeech) return;
+  audioSessionPlayback();
   try { speechSynthesis.cancel(); } catch (e) {}
   const u = new SpeechSynthesisUtterance(text);
   const v = pickVoice();
@@ -135,6 +144,7 @@ function updateVoiceBanner() {
 let audioCtx = null;
 function chime(good) {
   try {
+    audioSessionPlayback();
     audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
     if (audioCtx.state === 'suspended') audioCtx.resume();
     const t0 = audioCtx.currentTime;
