@@ -468,7 +468,7 @@ const REPO = 'gwallee/Palabritas';
 // to the repo with no GitHub account on the phone. Paste the deployment's /exec
 // URL here. Empty = fall back to opening GitHub's prefilled commit page, which
 // only works signed in with write access to the repo.
-const CLOUD_SYNC_URL = '';
+const CLOUD_SYNC_URL = 'https://script.google.com/macros/s/AKfycbwFMDYQKRpTcpmQvYr1oavoccU-cJtgGc6rvAq2G12uWtyn7v4xZQrHT_FaUKrgmivXDA/exec';
 
 function slugify(text) {
   return stripVowelAccents(String(text).toLowerCase())
