@@ -242,9 +242,19 @@ git push origin main && git push origin main:gh-pages
   write access, which only Brian's account has (no PRs/forks ever arrived — her words
   were stranded in her phone's localStorage). ☁️ now POSTs to the relay when
   `CLOUD_SYNC_URL` (app.js) is set; relay validates and commits via the GitHub API.
-  **Setup pending: `CLOUD_SYNC_URL` is still `''`** — Brian must do steps 1–6 in the
-  Code.gs header (token + script deploy) and then the URL goes into app.js + redeploy.
-  Until then the old Brian-only fallback flow still works.
+  Setup completed 2026-09-22: relay deployed ("Anyone" access, no PIN set),
+  `CLOUD_SYNC_URL` set in app.js, `testConnectivity()` verified HTTP 200. The old
+  Brian-only prefilled-commit flow remains as the fallback if the URL is ever emptied.
+  v1.9.1 (current): auto-sync — every editor **Save list** also POSTs to the relay
+  (quietly), so lists appear on the other phone with no button pressing; ☁️ stays as a
+  loud manual push. A failed/offline publish sets `pendingCloud` on the list (⏳ after
+  its name on home) and retries on next app open and on the `online` event, BEFORE
+  `syncCloudLists()` pulls. Local lists get a sticky `cloudId` (repo filename) on first
+  publish so renames/retries never fork a second file. Sync guards: an entry whose file
+  has a `pendingCloud` local twin is skipped (unpublished edits win until they land),
+  and `dropPromotedLocal` never drops a `pendingCloud` list, but does match by `cloudId`.
+  Known accepted tradeoff: two phones editing the SAME list offline → last publish wins
+  (no merge). Points/streak sync is still explicitly out (per 2026-08-25 decision).
 - `lists.json` is committed empty (`[]`) — no AI/test lists were ever deployed; a "Cloud
   Test List" existed only inside a local test browser during development.
 - **Removed by Brian's request (2026-08-24, "that was an accident"):** an uncommitted

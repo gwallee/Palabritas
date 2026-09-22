@@ -186,7 +186,7 @@ function renderHome() {
   $('active-card').classList.toggle('hidden', !list);
   $('empty-card').classList.toggle('hidden', !!list);
   if (list) {
-    $('active-name').textContent = list.name;
+    $('active-name').textContent = list.name + (list.pendingCloud ? ' ⏳' : '');
     let meta = list.words.length + ' words';
     if (list.lastResult) meta += ` · last time ${list.lastResult.perfect}/${list.lastResult.total} on the first try`;
     const mastered = list.words.filter(w => masteryFor(list.id, w).stars === 3).length;
@@ -221,7 +221,7 @@ function renderHome() {
       info.className = 'past-info';
       const nm = document.createElement('div');
       nm.className = 'past-name';
-      nm.textContent = l.name;
+      nm.textContent = l.name + (l.pendingCloud ? ' ⏳' : '');
       const meta = document.createElement('div');
       meta.className = 'past-meta';
       meta.textContent = l.words.length + ' words';
@@ -425,19 +425,22 @@ function saveList() {
   const words = parseWords($('words-input').value);
   if (!words.length) { alert('Add at least one word first 🙂'); return; }
   const name = $('list-name').value.trim() || defaultListName();
+  let saved;
   if (editingId) {
-    const list = data.lists.find(l => l.id === editingId);
-    list.name = name;
-    list.words = words;
-    list.extras = buildExtras(words, list.extras);
-    data.activeListId = list.id;
+    saved = data.lists.find(l => l.id === editingId);
+    saved.name = name;
+    saved.words = words;
+    saved.extras = buildExtras(words, saved.extras);
+    data.activeListId = saved.id;
     if (data.paused && data.paused.listId === editingId) data.paused = null;  // words changed
   } else {
     const extras = buildExtras(words, null);
-    data.lists.unshift({ id: 'l' + Date.now(), name, words, extras, createdAt: Date.now() });
-    data.activeListId = data.lists[0].id;
+    saved = { id: 'l' + Date.now(), name, words, extras, createdAt: Date.now() };
+    data.lists.unshift(saved);
+    data.activeListId = saved.id;
   }
   save(); renderHome(); show('home');
+  publishList(saved, true);   // auto-sync to the other phone; queued (⏳) if offline
 }
 
 async function shareActiveList() {
@@ -478,42 +481,28 @@ function slugify(text) {
     .slice(0, 40) || 'lista';
 }
 
-// ☁️ Save to cloud. With CLOUD_SYNC_URL set, POST the list to the Apps Script
-// relay, which commits it to lists/ — works from any phone, no GitHub account.
-// Without it, fall back to opening GitHub's prefilled new-file commit page
-// (only completes for someone signed in with write access).
-function cloudSaveActiveList() {
-  const list = activeList();
-  if (!list) return;
-  const isCloud = list.id.startsWith('cloud-');
+// Publishing to the cloud. With CLOUD_SYNC_URL set, lists POST to the Apps
+// Script relay, which commits them to lists/ — works from any phone, no GitHub
+// account. Every editor save auto-publishes (quiet); the ☁️ button is a loud
+// manual push. A failed publish marks the list pendingCloud (⏳ on home) and
+// retries on the next app open or when the connection returns.
 
-  if (!CLOUD_SYNC_URL) {
-    if (isCloud) { alert('This list is already in the cloud.'); return; }
-    const id = new Date().toISOString().slice(0, 10) + '-' + slugify(list.name);
-    const payload = { id, name: list.name, words: list.words };
-    if (list.extras && Object.keys(list.extras).length) payload.extras = list.extras;
-    const body = JSON.stringify(payload, null, 2) + '\n';
-    const url = 'https://github.com/' + REPO + '/new/main'
-      + '?filename=' + encodeURIComponent('lists/' + id + '.json')
-      + '&value=' + encodeURIComponent(body);
-    window.open(url, '_blank');
-    return;
-  }
-
-  if (isCloud && !confirm('Update the cloud copy of this list for everyone?')) return;
-  const id = isCloud
-    ? list.id.slice('cloud-'.length)
-    : new Date().toISOString().slice(0, 10) + '-' + slugify(list.name);
-  const payload = { id, name: list.name, words: list.words };
-  if (list.extras && Object.keys(list.extras).length) payload.extras = list.extras;
-  cloudPost(payload);
+// The repo filename a list publishes under. Assigned once, then reused, so a
+// rename or a retry on a later day never forks a second cloud file.
+function cloudIdFor(list) {
+  if (list.id.startsWith('cloud-')) return list.id.slice('cloud-'.length);
+  if (!list.cloudId) list.cloudId = new Date().toISOString().slice(0, 10) + '-' + slugify(list.name);
+  return list.cloudId;
 }
 
-async function cloudPost(payload) {
-  const btn = $('btn-cloud-save');
-  const oldLabel = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = '☁️ Saving…';
+function listPayload(list) {
+  const payload = { id: cloudIdFor(list), name: list.name, words: list.words };
+  if (list.extras && Object.keys(list.extras).length) payload.extras = list.extras;
+  return payload;
+}
+
+async function publishList(list, quiet) {
+  if (!CLOUD_SYNC_URL || !list) return;
   try {
     // text/plain keeps this a "simple" CORS request — Apps Script cannot answer
     // a preflight OPTIONS (same trick as MathFacts; do not change to JSON).
@@ -522,21 +511,58 @@ async function cloudPost(payload) {
     const r = await fetch(CLOUD_SYNC_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(listPayload(list)),
       signal: ctrl.signal,
     });
     clearTimeout(timer);
     const res = await r.json();
     if (!res.ok) throw new Error(res.error || 'The cloud said no');
-    alert('✅ Saved to the cloud!\n\nIt will show up on the other phone the next time the app opens online.');
+    delete list.pendingCloud;
+    save(); renderHome();
+    if (!quiet) alert('✅ Saved to the cloud!\n\nIt will show up on the other phone the next time the app opens online.');
     syncCloudLists();   // promote the local copy to its cloud- id right away
   } catch (e) {
-    const why = e.name === 'AbortError' ? 'it took too long' : (e.message || 'no connection');
-    alert('Could not save to the cloud (' + why + ').\n\nThe list is still safe on this phone — try again later, or use 📤 Share list.');
-  } finally {
+    list.pendingCloud = true;   // ⏳ on home; retried on next open / back online
+    save(); renderHome();
+    if (!quiet) {
+      const why = e.name === 'AbortError' ? 'it took too long' : (e.message || 'no connection');
+      alert('Could not save to the cloud (' + why + ').\n\nThe list is safe on this phone and will sync by itself when there is a connection (⏳ next to its name until then).');
+    }
+  }
+}
+
+async function retryPendingPublishes() {
+  if (!CLOUD_SYNC_URL) return;
+  for (const list of data.lists.filter(l => l.pendingCloud)) {
+    await publishList(list, true);   // sequential — one commit at a time
+  }
+}
+
+function cloudSaveActiveList() {
+  const list = activeList();
+  if (!list) return;
+  const isCloud = list.id.startsWith('cloud-');
+
+  if (!CLOUD_SYNC_URL) {   // fallback: GitHub's prefilled commit page (needs repo write access)
+    if (isCloud) { alert('This list is already in the cloud.'); return; }
+    const body = JSON.stringify(listPayload(list), null, 2) + '\n';
+    const url = 'https://github.com/' + REPO + '/new/main'
+      + '?filename=' + encodeURIComponent('lists/' + cloudIdFor(list) + '.json')
+      + '&value=' + encodeURIComponent(body);
+    save();   // keep the assigned cloudId
+    window.open(url, '_blank');
+    return;
+  }
+
+  if (isCloud && !confirm('Update the cloud copy of this list for everyone?')) return;
+  const btn = $('btn-cloud-save');
+  const oldLabel = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '☁️ Saving…';
+  publishList(list, false).finally(() => {
     btn.disabled = false;
     btn.textContent = oldLabel;
-  }
+  });
 }
 
 async function fetchListsJson() {
@@ -580,12 +606,14 @@ async function fetchCloudFiles() {
 // After a list is committed to the cloud and synced back, drop the local copy
 // it was promoted from (same name, same words) so it doesn't show up twice.
 function dropPromotedLocal(cloudId, name, words) {
+  const rawId = cloudId.slice('cloud-'.length);
   const key = words.map(canon).sort().join('\n');
   const dup = data.lists.find(l =>
-    !l.id.startsWith('cloud-') &&
-    canon(l.name) === canon(name) &&
-    l.words.length === words.length &&
-    l.words.map(canon).sort().join('\n') === key);
+    !l.id.startsWith('cloud-') && !l.pendingCloud &&
+    (l.cloudId === rawId ||   // it published itself under this filename
+      (canon(l.name) === canon(name) &&
+        l.words.length === words.length &&
+        l.words.map(canon).sort().join('\n') === key)));
   if (!dup) return;
   data.lists = data.lists.filter(l => l.id !== dup.id);
   if (data.activeListId === dup.id) data.activeListId = cloudId;
@@ -602,11 +630,15 @@ async function syncCloudLists() {
     const addedIds = [];
     entries.forEach(cl => {
       if (!cl || !cl.id || !Array.isArray(cl.words) || !cl.words.length) return;
+      // A local list with unpublished edits destined for this same file wins —
+      // importing the older cloud copy now would duplicate or clobber it.
+      if (data.lists.some(l => l.pendingCloud && l.cloudId === String(cl.id))) return;
       const id = 'cloud-' + String(cl.id);
       const name = String(cl.name || cl.id);
       const words = cl.words.map(String);
       const extras = (cl.extras && typeof cl.extras === 'object') ? cl.extras : undefined;
       const existing = data.lists.find(l => l.id === id);
+      if (existing && existing.pendingCloud) return;   // local edits not yet uploaded win until they land
       if (existing) {   // the repo is the source of truth for cloud lists
         if (existing.name !== name || JSON.stringify(existing.words) !== JSON.stringify(words)) {
           existing.name = name;
@@ -1425,7 +1457,10 @@ function init() {
 }
 
 init();
-syncCloudLists();
+// Upload anything still waiting (⏳) first, so the sync that follows sees the
+// freshest files; then pull. Also retry the moment a connection comes back.
+retryPendingPublishes().then(syncCloudLists);
+window.addEventListener('online', retryPendingPublishes);
 
 /* ---------- offline support ---------- */
 if ('serviceWorker' in navigator) {
