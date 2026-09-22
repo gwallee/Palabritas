@@ -33,6 +33,10 @@ backend; word lists and scores live in each device's localStorage.
   `image.pollinations.ai` requests (AI word pictures) get their own cache-first runtime
   caching branch, checked before the same-origin-only guard.
 - `lists.json` — the shared word-list feed (see below). Currently `[]`.
+- `apps-script/Code.gs` — cloud-save relay (v1.9): paste-in copy for a Google Apps
+  Script web app that commits POSTed lists to `lists/` using a GitHub token stored in
+  Script Properties. Setup steps are in its header comment. Lets the wife's phone
+  publish lists without a GitHub account.
 - `dev-server.mjs` + `.claude/launch.json` (server name `palabritas`) — local static server
   for testing in the Claude Code browser pane.
 - `manifest.webmanifest`, icons — PWA install metadata.
@@ -105,11 +109,17 @@ backend; word lists and scores live in each device's localStorage.
 2. **Cloud lists in the repo** (all read from **main**, so a github.com commit reaches
    phones with NO redeploy). Two stores, both honored by sync:
    - `lists/<id>.json` — one file per list, `{ "id", "name", "words": [...] }`. Created by
-     the **☁️ Save to cloud** button (home screen, device-created lists only): it opens
-     GitHub's new-file page pre-filled via `/new/main?filename=lists/<id>.json&value=…` —
-     Brian (signed into github.com in Safari) just taps Commit. No token, no credentials
-     in the app. Includes `extras` (per-word emoji/sentence/image) when present. Ids are
-     `YYYY-MM-DD-<name-slug>` so the directory sorts chronologically.
+     the **☁️ Save to cloud** button (home screen). With `CLOUD_SYNC_URL` set in app.js
+     (v1.9), the button POSTs the list to the Apps Script relay (`apps-script/Code.gs`),
+     which commits it via the GitHub API — works from ANY phone, no GitHub account needed;
+     cloud lists get an "☁️ Update cloud copy" button too (re-publish edits). The GitHub
+     token lives only in the script's Script Properties, never in app source. With
+     `CLOUD_SYNC_URL` empty, falls back to the original flow: opens GitHub's new-file page
+     pre-filled via `/new/main?filename=lists/<id>.json&value=…`, which only completes
+     signed in with write access (that's Brian only — this is exactly why the wife's lists
+     never synced, discovered 2026-09-22). Includes `extras` (per-word emoji/sentence/
+     image) when present. Ids are `YYYY-MM-DD-<name-slug>` so the directory sorts
+     chronologically.
      Sync lists the folder via the GitHub contents API (unauthenticated, 60 req/h/IP) and
      uses each file's blob `sha` (stored as `cloudSha` on the list) to skip unchanged
      files. When a synced cloud list matches a local list by name+words, the local one is
@@ -220,9 +230,21 @@ git push origin main && git push origin main:gh-pages
   preferred SOUNDS over spoken letter feedback ("a ding for good") — spoken letter
   names ("¡Sí, la eme!") were built and then removed at his direction; offer them
   only as an optional toggle if he asks again.
-  v1.8.2 (current): 📷 Scan a photo (in-app Tesseract OCR) removed at Brian's request
+  v1.8.2: 📷 Scan a photo (in-app Tesseract OCR) removed at Brian's request
   (2026-09-16, "it doesn't seem to work" — the iOS keyboard's Scan Text does); `vendor/`
   deleted, SW precache down from ~8.8 MB to ~100 KB.
+  v1.8.3: audio session set to 'playback' before chimes/speech so sound plays with the
+  iPhone silent switch on (ported from MathFacts after Brian hit the muted-in-the-car
+  mystery; Safari 16.4+, no-op elsewhere). Whether it also unmutes speechSynthesis on
+  Brian's iOS version was untested at commit time.
+  v1.9.0 (current): Apps Script cloud-save relay. Root cause found 2026-09-22: the wife's
+  lists never reached GitHub because ☁️ Save to cloud's prefilled-commit page needs repo
+  write access, which only Brian's account has (no PRs/forks ever arrived — her words
+  were stranded in her phone's localStorage). ☁️ now POSTs to the relay when
+  `CLOUD_SYNC_URL` (app.js) is set; relay validates and commits via the GitHub API.
+  **Setup pending: `CLOUD_SYNC_URL` is still `''`** — Brian must do steps 1–6 in the
+  Code.gs header (token + script deploy) and then the URL goes into app.js + redeploy.
+  Until then the old Brian-only fallback flow still works.
 - `lists.json` is committed empty (`[]`) — no AI/test lists were ever deployed; a "Cloud
   Test List" existed only inside a local test browser during development.
 - **Removed by Brian's request (2026-08-24, "that was an accident"):** an uncommitted

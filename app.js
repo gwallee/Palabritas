@@ -200,7 +200,11 @@ function renderHome() {
     const trouble = list.words.filter(w => troubleFor(list.id, w));
     $('btn-trouble').classList.toggle('hidden', !trouble.length);
     $('trouble-count').textContent = trouble.length ? `(${trouble.length})` : '';
-    $('btn-cloud-save').classList.toggle('hidden', list.id.startsWith('cloud-'));
+    const isCloud = list.id.startsWith('cloud-');
+    const cloudBtn = $('btn-cloud-save');
+    // With the relay configured, cloud lists can be re-published too (edits/typos).
+    cloudBtn.classList.toggle('hidden', isCloud && !CLOUD_SYNC_URL);
+    cloudBtn.textContent = isCloud ? '☁️ Update cloud copy' : '☁️ Save to cloud';
   }
   const others = data.lists.filter(l => l.id !== data.activeListId);
   const box = $('past-lists');
@@ -460,6 +464,12 @@ async function shareActiveList() {
 
 const REPO = 'gwallee/Palabritas';
 
+// Apps Script relay (apps-script/Code.gs): lets any family phone commit a list
+// to the repo with no GitHub account on the phone. Paste the deployment's /exec
+// URL here. Empty = fall back to opening GitHub's prefilled commit page, which
+// only works signed in with write access to the repo.
+const CLOUD_SYNC_URL = '';
+
 function slugify(text) {
   return stripVowelAccents(String(text).toLowerCase())
     .replace(/ñ/g, 'n')
@@ -468,20 +478,65 @@ function slugify(text) {
     .slice(0, 40) || 'lista';
 }
 
-// ☁️ Save to cloud: open GitHub's new-file page pre-filled with this list —
-// the parent just taps Commit. No token, no credentials in the app.
+// ☁️ Save to cloud. With CLOUD_SYNC_URL set, POST the list to the Apps Script
+// relay, which commits it to lists/ — works from any phone, no GitHub account.
+// Without it, fall back to opening GitHub's prefilled new-file commit page
+// (only completes for someone signed in with write access).
 function cloudSaveActiveList() {
   const list = activeList();
   if (!list) return;
-  if (list.id.startsWith('cloud-')) { alert('This list is already in the cloud.'); return; }
-  const id = new Date().toISOString().slice(0, 10) + '-' + slugify(list.name);
+  const isCloud = list.id.startsWith('cloud-');
+
+  if (!CLOUD_SYNC_URL) {
+    if (isCloud) { alert('This list is already in the cloud.'); return; }
+    const id = new Date().toISOString().slice(0, 10) + '-' + slugify(list.name);
+    const payload = { id, name: list.name, words: list.words };
+    if (list.extras && Object.keys(list.extras).length) payload.extras = list.extras;
+    const body = JSON.stringify(payload, null, 2) + '\n';
+    const url = 'https://github.com/' + REPO + '/new/main'
+      + '?filename=' + encodeURIComponent('lists/' + id + '.json')
+      + '&value=' + encodeURIComponent(body);
+    window.open(url, '_blank');
+    return;
+  }
+
+  if (isCloud && !confirm('Update the cloud copy of this list for everyone?')) return;
+  const id = isCloud
+    ? list.id.slice('cloud-'.length)
+    : new Date().toISOString().slice(0, 10) + '-' + slugify(list.name);
   const payload = { id, name: list.name, words: list.words };
   if (list.extras && Object.keys(list.extras).length) payload.extras = list.extras;
-  const body = JSON.stringify(payload, null, 2) + '\n';
-  const url = 'https://github.com/' + REPO + '/new/main'
-    + '?filename=' + encodeURIComponent('lists/' + id + '.json')
-    + '&value=' + encodeURIComponent(body);
-  window.open(url, '_blank');
+  cloudPost(payload);
+}
+
+async function cloudPost(payload) {
+  const btn = $('btn-cloud-save');
+  const oldLabel = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '☁️ Saving…';
+  try {
+    // text/plain keeps this a "simple" CORS request — Apps Script cannot answer
+    // a preflight OPTIONS (same trick as MathFacts; do not change to JSON).
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 25000);
+    const r = await fetch(CLOUD_SYNC_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload),
+      signal: ctrl.signal,
+    });
+    clearTimeout(timer);
+    const res = await r.json();
+    if (!res.ok) throw new Error(res.error || 'The cloud said no');
+    alert('✅ Saved to the cloud!\n\nIt will show up on the other phone the next time the app opens online.');
+    syncCloudLists();   // promote the local copy to its cloud- id right away
+  } catch (e) {
+    const why = e.name === 'AbortError' ? 'it took too long' : (e.message || 'no connection');
+    alert('Could not save to the cloud (' + why + ').\n\nThe list is still safe on this phone — try again later, or use 📤 Share list.');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = oldLabel;
+  }
 }
 
 async function fetchListsJson() {
