@@ -17,5 +17,10 @@
     "finish",
     "holiday",
     "safety"
-  ]
+  ],
+  "extras": {
+    "illness": {
+      "image": "https://image.pollinations.ai/prompt/flat%20design%20vector%20illustration%2C%20thick%20black%20outlines%2C%20solid%20flat%20colors%2C%20minimalist%2C%20cute%20mascot%20art%20style%2C%20children's%20educational%20app%2C%20no%20text%2C%20no%20words%2C%20no%20letters%2C%20simple%20pastel%20solid%20background%2C%20illness?width=512&height=512&nologo=true&model=flux&seed=7"
+    }
+  }
 }
