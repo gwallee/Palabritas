@@ -145,6 +145,14 @@ body {
 .text-field:focus, textarea:focus { outline: none; border-color: var(--teal); }
 textarea { resize: vertical; min-height: 150px; }
 
+.lang-row { display: flex; gap: 8px; }
+.lang-btn {
+  flex: 1; border: 2px solid #EDE4D6; border-radius: 16px;
+  background: var(--card); padding: 11px 10px;
+  font: inherit; font-weight: 700; color: var(--muted); cursor: pointer;
+}
+.lang-btn.active { border-color: var(--teal); color: var(--ink); background: #EAF7F6; }
+
 .scan-hint {
   background: #EAF7F6; border: 2px dashed var(--teal);
   border-radius: 18px; padding: 13px 15px;

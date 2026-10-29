@@ -76,6 +76,12 @@
     <label class="field-label" for="list-name">List name</label>
     <input id="list-name" class="text-field" type="text" autocomplete="off">
 
+    <label class="field-label">Language</label>
+    <div class="lang-row">
+      <button class="lang-btn active" id="lang-es" type="button">🇲🇽 Español</button>
+      <button class="lang-btn" id="lang-en" type="button">🇺🇸 English</button>
+    </div>
+
     <div class="scan-hint">
       💡 To copy a printed list: tap the words box below, then choose <b>Scan Text</b> on the
       iPhone keyboard and point the camera at the sheet. Typing or pasting works too — check
@@ -234,6 +240,15 @@
       <p class="muted small">Tip: for the most natural voice on iPhone, download an
       <b>Enhanced</b> Spanish voice: Settings → Accessibility → Spoken&nbsp;Content →
       Voices → Spanish (e.g. Paulina&nbsp;Enhanced), then pick it here.</p>
+    </div>
+
+    <div class="card">
+      <label class="field-label" for="voice-select-en">English voice</label>
+      <select id="voice-select-en" class="text-field"></select>
+      <button class="big-btn secondary slim" id="btn-test-voice-en">🔊 Test voice</button>
+      <p class="muted small">Used for lists set to 🇺🇸 English. Enhanced voices
+      (e.g. Samantha&nbsp;Enhanced) are under Settings → Accessibility →
+      Spoken&nbsp;Content → Voices → English.</p>
     </div>
 
     <div class="card">

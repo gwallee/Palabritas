@@ -1,6 +1,6 @@
 # Palabritas — project handoff
 
-Offline Spanish spelling-practice PWA for Brian's 8-year-old daughter. Two iPhones in the
+Offline spelling-practice PWA (Spanish AND English since v2.0) for Brian's 8-year-old daughter. Two iPhones in the
 household (Brian + wife) install it from Safari via Add to Home Screen. No accounts, no
 backend; word lists and scores live in each device's localStorage.
 
@@ -41,13 +41,31 @@ backend; word lists and scores live in each device's localStorage.
   for testing in the Claude Code browser pane.
 - `manifest.webmanifest`, icons — PWA install metadata.
 
+## Languages (v2.0)
+
+- Each list has `lang: 'es' | 'en'` (missing = `'es'`, so every pre-v2.0 list stays
+  Spanish). Chosen with a 🇲🇽/🇺🇸 toggle in the list editor; `listLang()` is the accessor.
+- Everything downstream follows the list's language: `speak(text, rateMul, lang)` picks
+  the voice (`settings.voiceURI` for es, `settings.voiceURIEn` for en — both have pickers
+  + test buttons in settings; auto order en-us → en-gb → en-au → en), 💬 uses
+  `SENTENCE_FRAMES_EN` for en, hangman renders `H_ROWS_EN` (26 keys, no ñ), Learn hides
+  the Spanish-only syllable split, and 🔤 spell-out speaks letters in the list's language.
+- Praise/celebration speech stays Spanish on purpose (app personality), as do the UI's
+  Spanish flourishes. Accent leniency logic is untouched — English words simply have no
+  accents, so it never triggers; ñ rules are moot on the English keyboard.
+- `lang: "en"` rides along in the cloud payload, the lists/ files, and the share text
+  (a `🌐 english` marker line that paste-import absorbs into the toggle; parseWords
+  skips 📚 and 🌐 lines). Sync treats a lang change like any other repo edit.
+- Home shows "· 🇺🇸 English" on English lists. Emoji hints are Spanish-keyed, so English
+  words usually have none — the 🎨 picture button / extras cover English lists.
+
 ## Data model (localStorage key `palabritas`)
 
 ```
-{ lists: [{ id, name, words[], createdAt, lastResult?, extras? }],
+{ lists: [{ id, name, words[], lang?, createdAt, lastResult?, extras? }],
   activeListId,
   paused: null | { listId, queue[], done, results, requeued[], pointsEarned, savedAt },
-  settings: { voiceURI, rate, strict, retries },
+  settings: { voiceURI, voiceURIEn, rate, strict, retries },
   progress: { totalPoints, streak, lastPracticeDate, mastery, trouble } }
 ```
 
@@ -255,6 +273,11 @@ git push origin main && git push origin main:gh-pages
   and `dropPromotedLocal` never drops a `pendingCloud` list, but does match by `cloudId`.
   Known accepted tradeoff: two phones editing the SAME list offline → last publish wins
   (no merge). Points/streak sync is still explicitly out (per 2026-08-25 decision).
+  v2.0.0 (current): per-list language — English lists with a proper English voice (see
+  Languages section). The "Spelling Bee 1-15" cloud list was marked `"lang": "en"` in the
+  same deploy (it was English words being read by the Spanish voice — the motivating
+  case, 2026-10-28). Note: app.js's APP_VERSION had been stuck at 1.8.2 through the
+  v1.9.x releases; it tracks again from 2.0.0.
 - `lists.json` is committed empty (`[]`) — no AI/test lists were ever deployed; a "Cloud
   Test List" existed only inside a local test browser during development.
 - **Removed by Brian's request (2026-08-24, "that was an accident"):** an uncommitted
