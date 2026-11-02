@@ -118,6 +118,10 @@ function validateList_(p) {
 
   const out = { id: id, name: name, words: words };
 
+  // v2.0 language tag MUST survive validation — dropping it here was the bug
+  // that kept reverting English lists to Spanish on every publish round-trip.
+  if (p.lang === 'en') out.lang = 'en';
+
   // Optional per-word extras (emoji / teaching sentence / image URL) ride along
   // unchanged so updating a list never strips its enrichment.
   if (p.extras && typeof p.extras === 'object' && !Array.isArray(p.extras)) {

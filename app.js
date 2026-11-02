@@ -1,7 +1,7 @@
 'use strict';
 /* Palabritas — Spanish spelling practice PWA */
 
-const APP_VERSION = '2.0.0';
+const APP_VERSION = '2.0.1';
 
 /* ---------- helpers ---------- */
 const $ = id => document.getElementById(id);
@@ -663,7 +663,11 @@ async function syncCloudLists() {
       const id = 'cloud-' + String(cl.id);
       const name = String(cl.name || cl.id);
       const words = cl.words.map(String);
-      const lang = cl.lang === 'en' ? 'en' : 'es';
+      // Only an EXPLICIT lang in the repo file may change an existing list's
+      // language. A file with no lang says nothing — the old relay stripped the
+      // field from every publish, and treating that as "Spanish" kept reverting
+      // English lists on the phones (the v2.0.0 revert bug).
+      const cloudLang = (cl.lang === 'en' || cl.lang === 'es') ? cl.lang : null;
       const extras = (cl.extras && typeof cl.extras === 'object') ? cl.extras : undefined;
       const existing = data.lists.find(l => l.id === id);
       if (existing && existing.pendingCloud) return;   // local edits not yet uploaded win until they land
@@ -674,14 +678,14 @@ async function syncCloudLists() {
           if (data.paused && data.paused.listId === id) data.paused = null;
           changed = true;
         }
-        if (listLang(existing) !== lang) { existing.lang = lang; changed = true; }
+        if (cloudLang && listLang(existing) !== cloudLang) { existing.lang = cloudLang; changed = true; }
         if (JSON.stringify(existing.extras || null) !== JSON.stringify(extras || null)) {
           existing.extras = extras;   // enrichment arriving later shouldn't clear a pause
           changed = true;
         }
         if (cl.sha && existing.cloudSha !== cl.sha) { existing.cloudSha = cl.sha; changed = true; }
       } else {
-        data.lists.unshift({ id, name, words, lang, extras, createdAt: Date.now(), cloudSha: cl.sha });
+        data.lists.unshift({ id, name, words, lang: cloudLang || 'es', extras, createdAt: Date.now(), cloudSha: cl.sha });
         dropPromotedLocal(id, name, words);
         addedIds.push(id);
         changed = true;

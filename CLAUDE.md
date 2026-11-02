@@ -55,7 +55,13 @@ backend; word lists and scores live in each device's localStorage.
   accents, so it never triggers; ñ rules are moot on the English keyboard.
 - `lang: "en"` rides along in the cloud payload, the lists/ files, and the share text
   (a `🌐 english` marker line that paste-import absorbs into the toggle; parseWords
-  skips 📚 and 🌐 lines). Sync treats a lang change like any other repo edit.
+  skips 📚 and 🌐 lines). Sync applies lang to an existing list ONLY when the repo file
+  carries an explicit `"lang"` — a file without one says nothing about language. This is
+  deliberate (v2.0.1): the relay originally stripped `lang` from every publish, and
+  treating "no lang" as Spanish reverted English lists on every sync (Brian's revert
+  bug, 2026-11-01). The relay (apps-script/Code.gs) must preserve `lang` — if English
+  lists ever start reverting again, FIRST check that the deployed Apps Script is current
+  (Brian must re-paste Code.gs and Deploy → Manage deployments → New version).
 - Home shows "· 🇺🇸 English" on English lists. Emoji hints are Spanish-keyed, so English
   words usually have none — the 🎨 picture button / extras cover English lists.
 
