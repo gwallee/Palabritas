@@ -1,7 +1,7 @@
 'use strict';
 /* Palabritas — Spanish spelling practice PWA */
 
-const APP_VERSION = '2.0.1';
+const APP_VERSION = '2.0.2';
 
 /* ---------- helpers ---------- */
 const $ = id => document.getElementById(id);
@@ -90,6 +90,51 @@ function audioSessionPlayback() {
   try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
 }
 
+// Belt and braces (v2.0.2): audioSession.type alone proved flaky — sound
+// worked, then a new game came up silent until the ring switch was flipped.
+// iOS can hand the page's audio session back as "ambient" after an
+// interruption (speech engine, lock screen, app switch). A looping, fully
+// silent <audio> element is the long-standing workaround: while a media
+// element plays, WebKit keeps the whole page in the playback category, so
+// chimes AND speech ignore the silent switch. Started from user taps (iOS
+// needs a gesture), paused when the app is hidden so it never lingers on the
+// lock screen.
+let silentLoop = null;
+function silentWavUrl() {
+  const rate = 8000, n = rate / 2;               // 0.5 s of 8-bit mono silence
+  const buf = new ArrayBuffer(44 + n), v = new DataView(buf);
+  const str = (o, s) => [...s].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
+  str(0, 'RIFF'); v.setUint32(4, 36 + n, true); str(8, 'WAVE');
+  str(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, rate, true); v.setUint32(28, rate, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true);
+  str(36, 'data'); v.setUint32(40, n, true);
+  for (let i = 0; i < n; i++) v.setUint8(44 + i, 128); // 128 = silence for 8-bit PCM
+  return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+}
+function keepAudioUnmuted() {
+  if (document.hidden) return;
+  audioSessionPlayback();
+  try {
+    if (!silentLoop) {
+      silentLoop = document.createElement('audio');
+      silentLoop.setAttribute('x-webkit-airplay', 'deny');
+      silentLoop.preload = 'auto';
+      silentLoop.loop = true;
+      silentLoop.src = silentWavUrl();
+    }
+    if (silentLoop.paused) { const p = silentLoop.play(); if (p) p.catch(() => {}); }
+  } catch (e) {}
+  if (audioCtx && audioCtx.state !== 'running' && audioCtx.state !== 'closed') {
+    try { audioCtx.resume(); } catch (e) {}
+  }
+}
+['pointerdown', 'touchend', 'keydown'].forEach(ev =>
+  document.addEventListener(ev, keepAudioUnmuted, { capture: true, passive: true }));
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { try { silentLoop && silentLoop.pause(); } catch (e) {} }
+  else audioSessionPlayback();
+});
+
 const voicesFor = prefix =>
   voices.filter(v => (v.lang || '').toLowerCase().replace('_', '-').startsWith(prefix));
 const spanishVoices = () => voicesFor('es');
@@ -156,7 +201,8 @@ function chime(good) {
   try {
     audioSessionPlayback();
     audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
-    if (audioCtx.state === 'suspended') audioCtx.resume();
+    // iOS reports 'interrupted' (not just 'suspended') after a call/lock/app switch
+    if (audioCtx.state !== 'running') audioCtx.resume();
     const t0 = audioCtx.currentTime;
     const tone = (freq, start, dur, vol, type = 'sine') => {
       const o = audioCtx.createOscillator(), g = audioCtx.createGain();

@@ -261,7 +261,17 @@ git push origin main && git push origin main:gh-pages
   iPhone silent switch on (ported from MathFacts after Brian hit the muted-in-the-car
   mystery; Safari 16.4+, no-op elsewhere). Whether it also unmutes speechSynthesis on
   Brian's iOS version was untested at commit time.
-  v1.9.0 (current): Apps Script cloud-save relay. Root cause found 2026-09-22: the wife's
+  v2.0.2: silent-switch fix hardened. Brian hit it again 2026-11-06 — sound worked,
+  then a NEW game came up silent until he flipped the ring switch; so
+  `audioSession.type = 'playback'` alone isn't reliable (iOS can hand the session
+  back as ambient after an interruption). Added `keepAudioUnmuted()`: a looping,
+  fully silent generated-WAV `<audio>` element started on any tap (gesture needed)
+  and paused when the app is hidden — a playing media element keeps the page in
+  the playback category. Also `chime()` now resumes the AudioContext for ANY
+  non-running state (iOS uses 'interrupted', not just 'suspended'). Side effect:
+  tapping in the app pauses music from other apps (same as any media app).
+  If it still mutes, next suspects: speechSynthesis having its own session.
+  v1.9.0: Apps Script cloud-save relay. Root cause found 2026-09-22: the wife's
   lists never reached GitHub because ☁️ Save to cloud's prefilled-commit page needs repo
   write access, which only Brian's account has (no PRs/forks ever arrived — her words
   were stranded in her phone's localStorage). ☁️ now POSTs to the relay when
