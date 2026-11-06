@@ -49,7 +49,7 @@ body {
 .home-head .logo { font-size: 56px; line-height: 1; filter: drop-shadow(0 3px 4px rgba(70,50,30,.15)); }
 .home-head h1 { margin: 6px 0 0; font-size: 2.1rem; letter-spacing: .5px; color: var(--coral); }
 .tagline { margin: 2px 0 10px; color: var(--muted); }
-.corner-btn { position: absolute; top: 8px; right: 0; }
+.corner-btn { position: absolute; top: 8px; right: 0; z-index: 1; }  /* above the logo's drop-shadow layer, or most taps miss */
 
 .stats-row { display: flex; justify-content: center; gap: 10px; margin: 0 0 16px; }
 .stat-pill {

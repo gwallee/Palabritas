@@ -70,7 +70,8 @@ backend; word lists and scores live in each device's localStorage.
 ```
 { lists: [{ id, name, words[], lang?, createdAt, lastResult?, extras? }],
   activeListId,
-  paused: null | { listId, queue[], done, results, requeued[], pointsEarned, savedAt },
+  paused: null | { listId, queue[], done, results, requeued[], pointsEarned, headTries, savedAt },
+  deletedCloud?: { <repo file id>: <sha deleted> | true },   // v2.1: deleted cloud lists stay deleted
   settings: { voiceURI, voiceURIEn, rate, strict, retries },
   progress: { totalPoints, streak, lastPracticeDate, mastery, trouble } }
 ```
@@ -119,7 +120,10 @@ backend; word lists and scores live in each device's localStorage.
 - **This is the app's only external dependency** — everything else is self-hosted.
   Offline reliability
   after the first load depends on the service worker's runtime cache for
-  `image.pollinations.ai` (sw.js) — an image never seen before while online just isn't
+  `image.pollinations.ai` (sw.js) — its own `palabritas-img` cache (survives
+  deploys, capped at 400). Images MUST load with `crossOrigin='anonymous'`
+  (Pollinations sends ACAO `*`): before v2.1 they were opaque no-cors responses
+  (`ok === false`) and were never cached at all — an image never seen before while online just isn't
   cached, and falls back to emoji when offline. This tradeoff was discussed with Brian
   and accepted (see State / history) because downloading+committing actual image files
   isn't possible from an in-app button — GitHub's prefilled-commit trick only takes one
@@ -142,11 +146,20 @@ backend; word lists and scores live in each device's localStorage.
      pre-filled via `/new/main?filename=lists/<id>.json&value=…`, which only completes
      signed in with write access (that's Brian only — this is exactly why the wife's lists
      never synced, discovered 2026-09-22). Includes `extras` (per-word emoji/sentence/
-     image) when present. Ids are `YYYY-MM-DD-<name-slug>` so the directory sorts
-     chronologically.
+     image) when present. Ids are `YYYY-MM-DD-<name-slug>-<4 random>` (random tail since
+     v2.1 — two phones naming lists "Week of Nov 3" the same day used to share one file
+     and overwrite each other) so the directory sorts chronologically.
      Sync lists the folder via the GitHub contents API (unauthenticated, 60 req/h/IP) and
      uses each file's blob `sha` (stored as `cloudSha` on the list) to skip unchanged
-     files. When a synced cloud list matches a local list by name+words, the local one is
+     files. The body comes from raw.githubusercontent.com, which caches ~5 min, so
+     v2.1 hashes it (`blobShaMatches`) and ignores a body that isn't the listed sha —
+     storing new-sha + old-body froze phones on stale words. Syncs are single-flight
+     (`syncCloudLists` wraps `doSyncCloudLists`). `pendingCloud` is set BEFORE the
+     relay POST (in-flight counts as pending). A permanent relay refusal (bad data,
+     >100 words, wrong PIN) sets `cloudError` (⚠️ on home) instead of ⏳-forever;
+     only `GitHub…`/`No GITHUB_TOKEN` errors and network failures retry.
+     Promotion (`dropPromotedLocal`) moves mastery/trouble keys, lastResult and
+     the paused round to the cloud id. When a synced cloud list matches a local list by name+words, the local one is
      dropped (it was just promoted) so it doesn't appear twice.
    - `lists.json` — legacy single feed, newest first, fetched from raw main with the
      deployed copy as fallback. Still fine for hand edits / Claude-committed lists.
@@ -271,6 +284,23 @@ git push origin main && git push origin main:gh-pages
   non-running state (iOS uses 'interrupted', not just 'suspended'). Side effect:
   tapping in the app pauses music from other apps (same as any media app).
   If it still mutes, next suspects: speechSynthesis having its own session.
+  v2.1.0: full-stack review fixes (2026-11-06). Silent loop now only on game views
+  (practice/hangman/done) and torn down on leave/hide (it was stopping the parents'
+  music on any tap). Sync: sha-verified bodies, single-flight, pending-before-POST,
+  random cloudId tail, deleted cloud lists stay deleted, relay refusals → ⚠️,
+  progress carried over on promotion. Game: NFC normalization in canon/parseWords/
+  sync (decomposed ñ matched n), stale next-word timers guarded per session
+  (quit→resume skipped a word; hangman too), same-wrong-answer double submit
+  ignored, Learn double-tap guarded, resume keeps tries (`headTries`), copy-mode
+  second reveal no longer dropped on pause, Test hides tiles, lastResult only from
+  Practice, "again" repeats the mode, misplaced space = red tile. UI: ⚙️ z-index
+  (logo covered it), Practice tile keeps its layout, novelty iOS voices never
+  auto-picked, Check doesn't blur the input. syllables.js: never joins across h
+  (ca·ca·hua·te), `tl` onset (a·tle·ta), `sub[lr]…` → null.
+  **Deferred by Brian (do at a computer, needs Code.gs redeploy):** relay security —
+  restrict `image` to `https://image.pollinations.ai/`, add a parent PIN setting in
+  the app + set `PARENT_PIN`, size/rate limits, `waitLock` inside the try, and
+  optionally refuse overwriting a file without the base sha.
   v1.9.0: Apps Script cloud-save relay. Root cause found 2026-09-22: the wife's
   lists never reached GitHub because ☁️ Save to cloud's prefilled-commit page needs repo
   write access, which only Brian's account has (no PRs/forks ever arrived — her words

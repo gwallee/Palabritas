@@ -1,5 +1,9 @@
 /* Palabritas service worker — makes the app work fully offline */
-const CACHE = 'palabritas-v18';
+const CACHE = 'palabritas-v19';
+// AI word pictures live in their own cache that deploys DON'T wipe (v2.1) —
+// they're keyed by URL and never change. Capped so it can't grow forever.
+const IMG_CACHE = 'palabritas-img';
+const IMG_MAX = 400;
 const ASSETS = [
   './',
   './index.html',
@@ -25,10 +29,15 @@ self.addEventListener('install', e => {
 self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
+      .then(keys => Promise.all(keys.filter(k => k !== CACHE && k !== IMG_CACHE).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
+
+function trimImages(c) {
+  return c.keys().then(keys => Promise.all(
+    keys.slice(0, Math.max(0, keys.length - IMG_MAX)).map(k => c.delete(k))));   // oldest first
+}
 
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
@@ -37,15 +46,18 @@ self.addEventListener('fetch', e => {
   // AI word-picture images (from the in-app "Generate pictures" button) are
   // hotlinked from Pollinations.ai, not vendored — cache-first once fetched so
   // a word seen before still shows offline. Never-cached ones fall back to emoji.
+  // The app loads them with crossOrigin='anonymous' (Pollinations sends
+  // Access-Control-Allow-Origin: *), so responses are real CORS responses with
+  // resp.ok — the old no-cors loads were opaque (ok=false) and never cached.
   if (url.hostname === 'image.pollinations.ai') {
     e.respondWith(
-      caches.match(e.request).then(cached => cached || fetch(e.request).then(resp => {
+      caches.open(IMG_CACHE).then(c => c.match(e.request.url).then(cached => cached || fetch(e.request).then(resp => {
         if (resp && resp.ok) {
           const copy = resp.clone();
-          caches.open(CACHE).then(c => c.put(e.request, copy));
+          e.waitUntil(c.put(e.request.url, copy).then(() => trimImages(c)));
         }
         return resp;
-      }))
+      })))
     );
     return;
   }
