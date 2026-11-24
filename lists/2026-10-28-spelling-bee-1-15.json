@@ -1,0 +1,45 @@
+{
+  "id": "2026-10-28-spelling-bee-1-15",
+  "name": "Spelling Bee 1-33",
+  "lang": "en",
+  "words": [
+    "illness",
+    "lead",
+    "groan",
+    "sloth",
+    "knit",
+    "cloak",
+    "parade",
+    "whistle",
+    "total",
+    "indoors",
+    "trouble",
+    "relax",
+    "finish",
+    "holiday",
+    "safety",
+    "stout",
+    "spiders",
+    "entire",
+    "library",
+    "guide",
+    "hospital",
+    "mustard",
+    "company",
+    "ginger",
+    "narrow",
+    "medium",
+    "pennies",
+    "hiking",
+    "foolish",
+    "afraid",
+    "remember",
+    "result",
+    "charming"
+  ],
+  "extras": {
+    "illness": {
+      "image": "https://image.pollinations.ai/prompt/flat%20design%20vector%20illustration%2C%20thick%20black%20outlines%2C%20solid%20flat%20colors%2C%20minimalist%2C%20cute%20mascot%20art%20style%2C%20children's%20educational%20app%2C%20no%20text%2C%20no%20words%2C%20no%20letters%2C%20simple%20pastel%20solid%20background%2C%20illness?width=512&height=512&nologo=true&model=flux&seed=7"
+    }
+  }
+}

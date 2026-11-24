@@ -1,7 +1,7 @@
 'use strict';
 /* Palabritas — Spanish spelling practice PWA */
 
-const APP_VERSION = '1.8.2';
+const APP_VERSION = '2.2.0';
 
 /* ---------- helpers ---------- */
 const $ = id => document.getElementById(id);
@@ -20,7 +20,7 @@ const DEFAULTS = {
   lists: [],
   activeListId: null,
   paused: null,   // snapshot of an unfinished practice session (same device)
-  settings: { voiceURI: '', rate: 0.95, strict: false, retries: 2 },
+  settings: { voiceURI: '', voiceURIEn: '', rate: 0.95, strict: false, retries: 2 },
   progress: { totalPoints: 0, streak: 0, lastPracticeDate: null, mastery: {}, trouble: {} },
   pbn: { next: 0, gallery: [] },   // paint-by-number: next scene pointer + finished pictures
 };
@@ -40,6 +40,12 @@ function load() {
 let data = load();
 const save = () => localStorage.setItem('palabritas', JSON.stringify(data));
 const activeList = () => data.lists.find(l => l.id === data.activeListId) || null;
+// Each list has a language; everything downstream (voice, sentences, hangman
+// keyboard, syllables) follows it. Spanish is the default for older lists.
+const listLang = listOrId => {
+  const l = typeof listOrId === 'string' ? data.lists.find(x => x.id === listOrId) : listOrId;
+  return l && l.lang === 'en' ? 'en' : 'es';
+};
 const wordKey = (listId, word) => `${listId}|${canon(word)}`;
 const masteryFor = (listId, word) => data.progress.mastery[wordKey(listId, word)] || { stars: 0, clean: 0 };
 const troubleFor = (listId, word) => data.progress.trouble[wordKey(listId, word)] || null;
@@ -58,7 +64,9 @@ function recordMastery(listId, word, clean) {
 }
 
 /* ---------- word normalization ---------- */
-const canon = s => s.trim().toLowerCase().replace(/\s+/g, ' ');
+// NFC first: pasted/scanned text can carry "n + combining tilde" instead of a
+// real ñ (and split accents), which would break matching, tiles and hangman.
+const canon = s => s.normalize('NFC').trim().toLowerCase().replace(/\s+/g, ' ');
 // Strip accents on vowels (á→a, ü→u) but NEVER ñ→n: ñ is its own letter in Spanish.
 const stripVowelAccents = s => s
   .replace(/ñ/g, '')
@@ -86,37 +94,105 @@ function audioSessionPlayback() {
   try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
 }
 
-function spanishVoices() {
-  return voices.filter(v => (v.lang || '').toLowerCase().replace('_', '-').startsWith('es'));
+// Belt and braces (v2.0.2): audioSession.type alone proved flaky — sound
+// worked, then a new game came up silent until the ring switch was flipped.
+// iOS can hand the page's audio session back as "ambient" after an
+// interruption (speech engine, lock screen, app switch). A looping, fully
+// silent <audio> element is the long-standing workaround: while a media
+// element plays, WebKit keeps the whole page in the playback category, so
+// chimes AND speech ignore the silent switch. Started from user taps (iOS
+// needs a gesture). v2.1: only on the game screens (practice / hangman / done)
+// so it doesn't stop the parent's music elsewhere, and fully torn down — not
+// just paused — on leaving them or hiding the app, so no lock-screen widget.
+let silentLoop = null, silentUrl = null;
+const GAME_VIEWS = ['practice', 'hangman', 'done'];
+const inGameView = () => GAME_VIEWS.some(v => !$('view-' + v).classList.contains('hidden'));
+function silentWavUrl() {
+  const rate = 8000, n = rate / 2;               // 0.5 s of 8-bit mono silence
+  const buf = new ArrayBuffer(44 + n), v = new DataView(buf);
+  const str = (o, s) => [...s].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
+  str(0, 'RIFF'); v.setUint32(4, 36 + n, true); str(8, 'WAVE');
+  str(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, rate, true); v.setUint32(28, rate, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true);
+  str(36, 'data'); v.setUint32(40, n, true);
+  for (let i = 0; i < n; i++) v.setUint8(44 + i, 128); // 128 = silence for 8-bit PCM
+  return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
 }
+function stopSilentLoop() {
+  if (!silentLoop) return;
+  try { silentLoop.pause(); silentLoop.removeAttribute('src'); silentLoop.load(); } catch (e) {}
+  try { URL.revokeObjectURL(silentUrl); } catch (e) {}
+  silentLoop = null; silentUrl = null;
+}
+function keepAudioUnmuted() {
+  if (document.hidden) return;
+  audioSessionPlayback();
+  try {
+    if (!silentLoop) {
+      silentLoop = document.createElement('audio');
+      silentLoop.setAttribute('x-webkit-airplay', 'deny');
+      silentLoop.preload = 'auto';
+      silentLoop.loop = true;
+      silentLoop.src = silentUrl = silentWavUrl();
+    }
+    if (silentLoop.paused) { const p = silentLoop.play(); if (p) p.catch(() => {}); }
+  } catch (e) {}
+  if (audioCtx && audioCtx.state !== 'running' && audioCtx.state !== 'closed') {
+    try { audioCtx.resume().catch(() => {}); } catch (e) {}
+  }
+}
+// Later taps re-arm it (e.g. back from the background mid-game); the tap that
+// STARTS a game calls keepAudioUnmuted() directly from startPractice/startHangman.
+['pointerdown', 'touchend', 'keydown'].forEach(ev =>
+  document.addEventListener(ev, () => { if (inGameView()) keepAudioUnmuted(); }, { capture: true, passive: true }));
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) stopSilentLoop();
+  else audioSessionPlayback();
+});
 
-function pickVoice() {
-  const wanted = data.settings.voiceURI;
+const voicesFor = prefix =>
+  voices.filter(v => (v.lang || '').toLowerCase().replace('_', '-').startsWith(prefix));
+const spanishVoices = () => voicesFor('es');
+const englishVoices = () => voicesFor('en');
+
+const NOVELTY_VOICES = /^(Albert|Bad News|Bahh|Bells|Boing|Bubbles|Cellos|Good News|Jester|Organ|Superstar|Trinoids|Whisper|Wobble|Zarvox|Fred|Junior|Kathy|Ralph|Eddy|Flo|Grandma|Grandpa|Reed|Rocko|Sandy|Shelley)\b/i;
+
+function pickVoice(lang = 'es') {
+  const wanted = lang === 'en' ? data.settings.voiceURIEn : data.settings.voiceURI;
   if (wanted) {
     const v = voices.find(v => v.voiceURI === wanted);
     if (v) return v;
   }
-  const es = spanishVoices();
-  for (const p of ['es-mx', 'es-us', 'es-419', 'es-co', 'es-ar', 'es']) {
-    const v = es.find(v => v.lang.toLowerCase().replace('_', '-').startsWith(p));
+  let pool = lang === 'en' ? englishVoices() : spanishVoices();
+  // iOS 17+ lists joke voices (Zarvox, Bad News, Grandpa…) — never auto-pick
+  // those, and prefer a downloaded Enhanced/Premium voice within each locale.
+  const real = pool.filter(v => !NOVELTY_VOICES.test(v.name || ''));
+  if (real.length) pool = real;
+  const better = v => /enhanced|premium|mejorad/i.test((v.name || '') + ' ' + (v.voiceURI || ''));
+  pool = pool.filter(better).concat(pool.filter(v => !better(v)));
+  const prefs = lang === 'en'
+    ? ['en-us', 'en-gb', 'en-au', 'en']
+    : ['es-mx', 'es-us', 'es-419', 'es-co', 'es-ar', 'es'];
+  for (const p of prefs) {
+    const v = pool.find(v => v.lang.toLowerCase().replace('_', '-').startsWith(p));
     if (v) return v;
   }
   return null;
 }
 
-function speak(text, rateMul = 1) {
+function speak(text, rateMul = 1, lang = 'es') {
   if (!hasSpeech) return;
   audioSessionPlayback();
   try { speechSynthesis.cancel(); } catch (e) {}
   const u = new SpeechSynthesisUtterance(text);
-  const v = pickVoice();
+  const v = pickVoice(lang);
   if (v) { u.voice = v; u.lang = v.lang; }
-  else { u.lang = 'es-MX'; }  // even with no voice list, iOS honors the lang
+  else { u.lang = lang === 'en' ? 'en-US' : 'es-MX'; }  // even with no voice list, iOS honors the lang
   u.rate = Math.max(0.4, Math.min(1.5, data.settings.rate * rateMul));
   speechSynthesis.speak(u);
 }
 
-const speakSpelled = word => speak(word.split('').filter(c => c.trim()).join(', '), 0.9);
+const speakSpelled = (word, lang) => speak(word.split('').filter(c => c.trim()).join(', '), 0.9, lang);
 
 function refreshVoices() {
   try { voices = speechSynthesis.getVoices() || []; } catch (e) { voices = []; }
@@ -148,7 +224,8 @@ function chime(good) {
   try {
     audioSessionPlayback();
     audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
-    if (audioCtx.state === 'suspended') audioCtx.resume();
+    // iOS reports 'interrupted' (not just 'suspended') after a call/lock/app switch
+    if (audioCtx.state !== 'running') audioCtx.resume().catch(() => {});
     const t0 = audioCtx.currentTime;
     const tone = (freq, start, dur, vol, type = 'sine') => {
       const o = audioCtx.createOscillator(), g = audioCtx.createGain();
@@ -175,6 +252,7 @@ function chime(good) {
 function show(name) {
   ['home', 'edit', 'practice', 'hangman', 'done', 'settings'].forEach(v =>
     $('view-' + v).classList.toggle('hidden', v !== name));
+  if (!GAME_VIEWS.includes(name)) stopSilentLoop();
   window.scrollTo(0, 0);
 }
 
@@ -188,16 +266,17 @@ function renderHome() {
   $('active-card').classList.toggle('hidden', !list);
   $('empty-card').classList.toggle('hidden', !!list);
   if (list) {
-    $('active-name').textContent = list.name + (list.pendingCloud ? ' ⏳' : '');
+    $('active-name').textContent = list.name + (list.pendingCloud ? ' ⏳' : list.cloudError ? ' ⚠️' : '');
     let meta = list.words.length + ' words';
+    if (listLang(list) === 'en') meta += ' · 🇺🇸 English';
     if (list.lastResult) meta += ` · last time ${list.lastResult.perfect}/${list.lastResult.total} on the first try`;
     const mastered = list.words.filter(w => masteryFor(list.id, w).stars === 3).length;
     if (mastered) meta += ` · ${mastered}/${list.words.length} mastered ⭐`;
     $('active-count').textContent = meta;
     const p = pausedFor(list);
-    $('btn-practice').innerHTML = p
-      ? `▶&nbsp;&nbsp;Resume — ${p.queue.length} to go`
-      : '▶&nbsp;&nbsp;¡A practicar!';
+    // update only the label parts so the tile keeps its icon/title/subtitle look
+    $('btn-practice').querySelector('b').textContent = p ? 'Resume' : 'Practice';
+    $('btn-practice').querySelector('small').textContent = p ? `${p.queue.length} to go` : 'Hints and extra tries';
     $('btn-startover').classList.toggle('hidden', !p);
     const trouble = list.words.filter(w => troubleFor(list.id, w));
     $('btn-trouble').classList.toggle('hidden', !trouble.length);
@@ -226,7 +305,7 @@ function renderHome() {
       nm.textContent = l.name + (l.pendingCloud ? ' ⏳' : '');
       const meta = document.createElement('div');
       meta.className = 'past-meta';
-      meta.textContent = l.words.length + ' words';
+      meta.textContent = l.words.length + ' words' + (listLang(l) === 'en' ? ' · 🇺🇸' : '');
       info.append(nm, meta);
       const use = document.createElement('button');
       use.textContent = 'Use';
@@ -236,7 +315,7 @@ function renderHome() {
       del.textContent = '🗑';
       del.addEventListener('click', () => {
         if (!confirm(`Delete "${l.name}"?`)) return;
-        data.lists = data.lists.filter(x => x.id !== l.id);
+        removeList(l.id);
         save(); renderHome();
       });
       item.append(info, use, del);
@@ -248,6 +327,13 @@ function renderHome() {
 
 /* ---------- edit / new list ---------- */
 let editingId = null;
+let editingLang = 'es';
+
+function setEditingLang(lang) {
+  editingLang = lang === 'en' ? 'en' : 'es';
+  $('lang-es').classList.toggle('active', editingLang === 'es');
+  $('lang-en').classList.toggle('active', editingLang === 'en');
+}
 
 const defaultListName = () =>
   'Week of ' + new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
@@ -255,11 +341,11 @@ const defaultListName = () =>
 function parseWords(text) {
   const out = [], seen = new Set();
   text.split(/[\n,;•·|]+/).forEach(raw => {
-    if (/^\s*📚/.test(raw)) return;   // header line from a shared list
-    const w = raw
+    if (/^\s*[📚🌐]/u.test(raw)) return;   // header/language lines from a shared list
+    const w = raw.normalize('NFC')
       .replace(/^\s*\d+\s*[.):\-]*\s*/, '')            // leading "1." "2)" numbering
-      .replace(/^[\s\-–—*✓✔☐□]+/, '')                  // leading bullets/dashes
-      .replace(/[.,;:!?¡¿"“”'']+\s*$/g, '')            // trailing punctuation
+      .replace(/^[\s\-–—*✓✔☐□"“”‘’'«»]+/, '')          // leading bullets/dashes/quotes
+      .replace(/[.,;:!?¡¿"“”‘’'«»]+\s*$/g, '')         // trailing punctuation/quotes
       .trim().replace(/\s+/g, ' ');
     if (!w) return;
     // typing/paste noise filters: needs at least 2 letters, no digits, sane length
@@ -292,6 +378,7 @@ const pollinationsUrl = word =>
 function preloadImage(url) {
   return new Promise((resolve, reject) => {
     const img = new Image();
+    img.crossOrigin = 'anonymous';   // CORS response → the service worker can cache it for offline
     img.onload = () => resolve(url);
     img.onerror = reject;
     img.src = url;
@@ -319,6 +406,7 @@ function renderPicGrid() {
     const item = document.createElement('div');
     item.className = 'pic-item';
     const img = document.createElement('img');
+    img.crossOrigin = 'anonymous';
     img.src = ex.image;
     img.alt = w;
     const rm = document.createElement('button');
@@ -334,29 +422,46 @@ function renderPicGrid() {
   });
 }
 
+// A run belongs to the editor it started in: leaving/reopening the editor bumps
+// genRun and the old loop stops. Save is held while it runs, so no picture
+// finishes after the list was already saved (and gets lost).
+let genRun = 0, genBusy = false;
+function stopImageGen() {
+  genRun++;
+  genBusy = false;
+  $('btn-gen-images').disabled = false;
+  $('btn-save-list').disabled = false;
+}
+
 async function generateImages() {
   const words = parseWords($('words-input').value);
   if (!words.length) { alert('Add some words first 🙂'); return; }
   const todo = words.filter(w => !(editingExtras[canon(w)] && editingExtras[canon(w)].image));
   if (!todo.length) { alert('Every word already has a picture!'); return; }
-  const btn = $('btn-gen-images');
-  btn.disabled = true;
+  const run = ++genRun, extras = editingExtras;
+  genBusy = true;
+  $('btn-gen-images').disabled = true;
+  $('btn-save-list').disabled = true;
   for (let i = 0; i < todo.length; i++) {
     const w = todo[i];
     setGenProgress(`Generating pictures… ${i + 1} of ${todo.length}`, i / todo.length);
     try {
       const url = pollinationsUrl(w);
       await preloadImage(url);
-      editingExtras[canon(w)] = { ...(editingExtras[canon(w)] || {}), image: url };
+      if (run !== genRun) return;   // editor was left/reopened — drop it
+      extras[canon(w)] = { ...(extras[canon(w)] || {}), image: url };
       renderPicGrid();
     } catch (e) { /* generation failed — this word just falls back to emoji */ }
+    if (run !== genRun) return;
     if (i < todo.length - 1) await new Promise(r => setTimeout(r, 2500));  // free-tier: 1 request at a time
+    if (run !== genRun) return;
   }
   setGenProgress("Done! Tap ✕ on any picture you don't like to use the emoji instead.", 1);
-  btn.disabled = false;
+  stopImageGen();
 }
 
 function openEdit(listId) {
+  stopImageGen();
   editingId = listId || null;
   const list = listId ? data.lists.find(l => l.id === listId) : null;
   $('edit-title').textContent = list ? 'Edit list' : 'New word list';
@@ -364,6 +469,7 @@ function openEdit(listId) {
   $('words-input').value = list ? list.words.join('\n') : '';
   $('btn-delete-list').classList.toggle('hidden', !list);
   $('gen-progress').classList.add('hidden');
+  setEditingLang(list ? listLang(list) : 'es');
   editingExtras = {};
   if (list && list.extras) {
     for (const [k, v] of Object.entries(list.extras)) {
@@ -375,9 +481,14 @@ function openEdit(listId) {
   show('edit');
 }
 
-// If a shared list was pasted in, lift its "📚 name" header into the name field.
+// If a shared list was pasted in, lift its "📚 name" header into the name field
+// and its "🌐 english" marker into the language toggle.
 function absorbSharedName() {
   const ta = $('words-input');
+  if (/^\s*🌐\s*english/mi.test(ta.value)) {
+    setEditingLang('en');
+    ta.value = ta.value.replace(/^\s*🌐.*$/m, '');
+  }
   const m = ta.value.match(/^\s*📚\s*(.+)\s*$/m);
   if (!m) return;
   const nameField = $('list-name');
@@ -433,12 +544,13 @@ function saveList() {
     saved = data.lists.find(l => l.id === editingId);
     saved.name = name;
     saved.words = words;
+    saved.lang = editingLang;
     saved.extras = buildExtras(words, saved.extras);
     data.activeListId = saved.id;
     if (data.paused && data.paused.listId === editingId) data.paused = null;  // words changed
   } else {
     const extras = buildExtras(words, null);
-    saved = { id: 'l' + Date.now(), name, words, extras, createdAt: Date.now() };
+    saved = { id: 'l' + Date.now(), name, words, lang: editingLang, extras, createdAt: Date.now() };
     data.lists.unshift(saved);
     data.activeListId = saved.id;
   }
@@ -449,7 +561,8 @@ function saveList() {
 async function shareActiveList() {
   const list = activeList();
   if (!list) return;
-  const text = `📚 ${list.name}\n${list.words.join('\n')}\n\nOpen Palabritas → New word list → paste this in!\nhttps://gwallee.github.io/Palabritas/`;
+  const langLine = listLang(list) === 'en' ? '🌐 english\n' : '';
+  const text = `📚 ${list.name}\n${langLine}${list.words.join('\n')}\n\nOpen Palabritas → New word list → paste this in!\nhttps://gwallee.github.io/Palabritas/`;
   if (navigator.share) {
     try { await navigator.share({ text }); return; } catch (e) { /* user cancelled */ return; }
   }
@@ -494,18 +607,32 @@ function slugify(text) {
 // rename or a retry on a later day never forks a second cloud file.
 function cloudIdFor(list) {
   if (list.id.startsWith('cloud-')) return list.id.slice('cloud-'.length);
-  if (!list.cloudId) list.cloudId = new Date().toISOString().slice(0, 10) + '-' + slugify(list.name);
+  // Random tail (v2.1): both parents making "Week of Nov 3" the same day used to
+  // land on the SAME file, and the second save overwrote the first list.
+  if (!list.cloudId) list.cloudId = new Date().toISOString().slice(0, 10) + '-'
+    + slugify(list.name).slice(0, 34).replace(/-+$/, '') + '-' + Math.random().toString(36).slice(2, 6);
   return list.cloudId;
 }
 
 function listPayload(list) {
   const payload = { id: cloudIdFor(list), name: list.name, words: list.words };
+  if (listLang(list) === 'en') payload.lang = 'en';
   if (list.extras && Object.keys(list.extras).length) payload.extras = list.extras;
   return payload;
 }
 
+// Relay answers that will never succeed on retry (bad data, wrong PIN…), as
+// opposed to GitHub hiccups / no connection, which are worth retrying.
+const RETRYABLE_RELAY_ERROR = /^(GitHub|No GITHUB_TOKEN)/;
+
 async function publishList(list, quiet) {
   if (!CLOUD_SYNC_URL || !list) return;
+  // Marked pending BEFORE the upload (v2.1): if iOS closes the app mid-request,
+  // the list still shows ⏳ and retries next open — and a sync running at the
+  // same time can't overwrite these edits with the older cloud copy.
+  list.pendingCloud = true;
+  delete list.cloudError;
+  save();
   try {
     // text/plain keeps this a "simple" CORS request — Apps Script cannot answer
     // a preflight OPTIONS (same trick as MathFacts; do not change to JSON).
@@ -519,6 +646,15 @@ async function publishList(list, quiet) {
     });
     clearTimeout(timer);
     const res = await r.json();
+    if (!res.ok && !RETRYABLE_RELAY_ERROR.test(res.error || '')) {
+      // Permanent refusal: stop retrying (it used to sit at ⏳ forever and block
+      // all repo updates to the list). The list stays fine on this phone.
+      delete list.pendingCloud;
+      list.cloudError = res.error || 'refused';
+      save(); renderHome();
+      alert(`"${list.name}" was saved on this phone, but the cloud refused it: ${list.cloudError}`);
+      return;
+    }
     if (!res.ok) throw new Error(res.error || 'The cloud said no');
     delete list.pendingCloud;
     save(); renderHome();
@@ -578,6 +714,18 @@ async function fetchListsJson() {
   return r2.json();
 }
 
+// git's blob id = sha1("blob <size>\0" + bytes). No crypto.subtle (very old
+// browser / insecure origin) → can't check, so accept as before.
+async function blobShaMatches(bytes, sha) {
+  if (!(window.crypto && crypto.subtle) || !sha) return true;
+  const head = new TextEncoder().encode(`blob ${bytes.byteLength}\0`);
+  const buf = new Uint8Array(head.length + bytes.byteLength);
+  buf.set(head);
+  buf.set(new Uint8Array(bytes), head.length);
+  const d = new Uint8Array(await crypto.subtle.digest('SHA-1', buf));
+  return [...d].map(b => b.toString(16).padStart(2, '0')).join('') === sha;
+}
+
 // One file per list in lists/ on main. The directory listing gives each file's
 // blob sha, so unchanged lists cost no extra fetches on later syncs.
 async function fetchCloudFiles() {
@@ -595,11 +743,22 @@ async function fetchCloudFiles() {
       const id = f.name.slice(0, -5);
       const existing = data.lists.find(l => l.id === 'cloud-' + id);
       if (existing && existing.cloudSha === f.sha) continue;   // unchanged
+      const del = data.deletedCloud && data.deletedCloud[id];
+      if (del && (del === true || del === f.sha)) continue;    // deleted on this phone
       try {
-        const fr = await fetch(f.download_url, { cache: 'no-cache' });
+        const u = new URL(f.download_url);
+        u.searchParams.set('v', f.sha);   // nudges the raw CDN past its 5-minute cache
+        const fr = await fetch(u.href, { cache: 'no-cache' });
         if (!fr.ok) continue;
-        const j = await fr.json();
-        entries.push({ id, name: j.name, words: j.words, extras: j.extras, sha: f.sha });
+        const bytes = await fr.arrayBuffer();
+        // raw.githubusercontent.com can serve the OLD body for ~5 min after a
+        // commit while the listing already shows the NEW sha. Storing that pair
+        // froze phones on stale words (the sha matched, so it never refetched).
+        // Only accept a body whose git blob hash IS the listed sha; otherwise
+        // skip and the next sync tries again.
+        if (!(await blobShaMatches(bytes, f.sha))) continue;
+        const j = JSON.parse(new TextDecoder().decode(bytes));
+        entries.push({ id, name: j.name, words: j.words, lang: j.lang, extras: j.extras, sha: f.sha });
       } catch (e) { /* skip malformed/unreachable file */ }
     }
   } catch (e) { /* offline — no problem */ }
@@ -620,10 +779,35 @@ function dropPromotedLocal(cloudId, name, words) {
   if (!dup) return;
   data.lists = data.lists.filter(l => l.id !== dup.id);
   if (data.activeListId === dup.id) data.activeListId = cloudId;
-  if (data.paused && data.paused.listId === dup.id) data.paused = null;
+  // Same list under a new id: carry its stars, trouble words, last result and
+  // paused round over instead of losing them (keys are "<listId>|word").
+  for (const store of [data.progress.mastery, data.progress.trouble]) {
+    for (const k of Object.keys(store)) {
+      if (!k.startsWith(dup.id + '|')) continue;
+      const nk = cloudId + k.slice(dup.id.length);
+      if (!store[nk]) store[nk] = store[k];
+      delete store[k];
+    }
+  }
+  const cloud = data.lists.find(l => l.id === cloudId);
+  if (cloud && dup.lastResult && !cloud.lastResult) cloud.lastResult = dup.lastResult;
+  if (data.paused && data.paused.listId === dup.id) data.paused.listId = cloudId;
 }
 
-async function syncCloudLists() {
+// One at a time — the open, post-publish and back-online syncs used to overlap.
+// A request that arrives mid-sync runs once more afterwards (it may need files
+// committed after the running sync listed the folder).
+let syncing = null, syncAgain = false;
+function syncCloudLists() {
+  if (syncing) { syncAgain = true; return syncing; }
+  syncing = doSyncCloudLists().finally(() => {
+    syncing = null;
+    if (syncAgain) { syncAgain = false; syncCloudLists(); }
+  });
+  return syncing;
+}
+
+async function doSyncCloudLists() {
   try {
     const entries = [];
     const legacy = await fetchListsJson();
@@ -636,9 +820,16 @@ async function syncCloudLists() {
       // A local list with unpublished edits destined for this same file wins —
       // importing the older cloud copy now would duplicate or clobber it.
       if (data.lists.some(l => l.pendingCloud && l.cloudId === String(cl.id))) return;
+      const del = data.deletedCloud && data.deletedCloud[String(cl.id)];
+      if (del && (del === true || !cl.sha || del === cl.sha)) return;   // deleted on this phone
       const id = 'cloud-' + String(cl.id);
       const name = String(cl.name || cl.id);
-      const words = cl.words.map(String);
+      const words = cl.words.map(w => String(w).normalize('NFC'));
+      // Only an EXPLICIT lang in the repo file may change an existing list's
+      // language. A file with no lang says nothing — the old relay stripped the
+      // field from every publish, and treating that as "Spanish" kept reverting
+      // English lists on the phones (the v2.0.0 revert bug).
+      const cloudLang = (cl.lang === 'en' || cl.lang === 'es') ? cl.lang : null;
       const extras = (cl.extras && typeof cl.extras === 'object') ? cl.extras : undefined;
       const existing = data.lists.find(l => l.id === id);
       if (existing && existing.pendingCloud) return;   // local edits not yet uploaded win until they land
@@ -649,13 +840,14 @@ async function syncCloudLists() {
           if (data.paused && data.paused.listId === id) data.paused = null;
           changed = true;
         }
+        if (cloudLang && listLang(existing) !== cloudLang) { existing.lang = cloudLang; changed = true; }
         if (JSON.stringify(existing.extras || null) !== JSON.stringify(extras || null)) {
           existing.extras = extras;   // enrichment arriving later shouldn't clear a pause
           changed = true;
         }
         if (cl.sha && existing.cloudSha !== cl.sha) { existing.cloudSha = cl.sha; changed = true; }
       } else {
-        data.lists.unshift({ id, name, words, extras, createdAt: Date.now(), cloudSha: cl.sha });
+        data.lists.unshift({ id, name, words, lang: cloudLang || 'es', extras, createdAt: Date.now(), cloudSha: cl.sha });
         dropPromotedLocal(id, name, words);
         addedIds.push(id);
         changed = true;
@@ -666,11 +858,26 @@ async function syncCloudLists() {
   } catch (e) { /* offline — no problem */ }
 }
 
+// Deleting a list that has a cloud copy remembers that file (and the version
+// deleted), so the next sync doesn't quietly bring it back. If someone later
+// EDITS that file in the cloud, its sha changes and it returns — on purpose.
+function removeList(id) {
+  const l = data.lists.find(x => x.id === id);
+  if (!l) return;
+  const fileId = l.id.startsWith('cloud-') ? l.id.slice('cloud-'.length) : l.cloudId;
+  if (fileId) {
+    data.deletedCloud = data.deletedCloud || {};
+    data.deletedCloud[fileId] = l.cloudSha || true;
+  }
+  data.lists = data.lists.filter(x => x.id !== id);
+  if (data.paused && data.paused.listId === id) data.paused = null;
+  if (data.activeListId === id) data.activeListId = data.lists.length ? data.lists[0].id : null;
+}
+
 function deleteList() {
   if (!editingId || !confirm('Delete this list?')) return;
-  data.lists = data.lists.filter(l => l.id !== editingId);
-  if (data.paused && data.paused.listId === editingId) data.paused = null;
-  if (data.activeListId === editingId) data.activeListId = data.lists.length ? data.lists[0].id : null;
+  stopImageGen();
+  removeList(editingId);
   save(); renderHome(); show('home');
 }
 
@@ -743,7 +950,7 @@ function emojiFor(word) {
     EMOJI_INDEX = {};
     for (const [k, v] of Object.entries(WORD_EMOJI)) EMOJI_INDEX[stripVowelAccents(k)] = v;
   }
-  let w = canon(word).replace(/^(el|la|los|las|un|una|unos|unas)\s+/, '');
+  let w = canon(word).replace(/^(el|la|los|las|un|una|unos|unas|the|a|an)\s+/, '');
   const candidates = [w];
   if (w.endsWith('es')) candidates.push(w.slice(0, -2));
   if (w.endsWith('s')) candidates.push(w.slice(0, -1));
@@ -762,6 +969,11 @@ const SENTENCE_FRAMES = [
   'La palabra de hoy es: {w}.',
   'En la escuela aprendimos la palabra {w}.',
 ];
+const SENTENCE_FRAMES_EN = [
+  'Listen carefully: {w}.',
+  "Today's word is: {w}.",
+  'Can you spell the word {w}?',
+];
 
 // Per-word enrichment ({ emoji, sentence, image }) — defaults to the practice
 // session's list; hangman passes its own listId explicitly.
@@ -774,9 +986,11 @@ function wordExtra(word, listId) {
 }
 
 function speakSentence(word, listId) {
+  const lang = listLang(listId || (session && session.listId));
   const ex = wordExtra(word, listId);
-  if (ex && ex.sentence) { speak(ex.sentence, 0.92); return; }
-  speak(pick(SENTENCE_FRAMES).replace('{w}', word), 0.95);
+  if (ex && ex.sentence) { speak(ex.sentence, 0.92, lang); return; }
+  const frames = lang === 'en' ? SENTENCE_FRAMES_EN : SENTENCE_FRAMES;
+  speak(pick(frames).replace('{w}', word), 0.95, lang);
 }
 
 /* ---------- paint-by-number rewards ---------- */
@@ -843,6 +1057,7 @@ const MINI_STREAKS = { 3: '🔥 ¡3 seguidas!', 5: '🌟 ¡5 seguidas! ¡Imparab
 // (index 2 covers "3rd try or later"). A word that gets revealed earns 0.
 const POINTS_BY_TRY = [10, 8, 5];
 let session = null;
+let againKind = 'practice';
 
 const todayStr = () => {
   const d = new Date();
@@ -876,9 +1091,11 @@ function pausedFor(list) {
 function saveSession() {
   if (!session) return;
   if (session.kind !== 'practice') { save(); return; }
-  // The in-progress word goes back to the front (fresh tries on resume);
-  // in copy mode it's already re-queued, so don't add it twice.
-  const head = (session.mode !== 'copy' && session.current) ? [session.current] : [];
+  // The in-progress word goes back to the front. In copy mode it's usually
+  // already re-queued — but not on its SECOND reveal (re-queue is once per
+  // word), so check the queue instead of assuming, or the word gets dropped.
+  const cur = session.current;
+  const head = cur && !(session.mode === 'copy' && session.queue.includes(cur)) ? [cur] : [];
   data.paused = {
     listId: session.listId,
     queue: head.concat(session.queue),
@@ -890,6 +1107,9 @@ function saveSession() {
     cleanRun: session.cleanRun,
     pbnScene: session.pbnScene,
     pbnTotal: session.pbnTotal,
+    // wrong tries already spent on the head word, so resuming can't reset them
+    // (that turned a 5-point word back into a 10-point one)
+    headTries: head.length && session.mode !== 'copy' ? session.tries : 0,
     savedAt: Date.now(),
   };
   save();
@@ -902,9 +1122,11 @@ function startPractice(fresh = false, kind = 'practice') {
   let words = list.words;
   if (kind === 'trouble') words = words.filter(w => troubleFor(list.id, w));
   if (!words.length) return;
+  const lang = listLang(list);
   if (p) {
     session = {
       listId: list.id,
+      lang,
       queue: p.queue.slice(),
       done: p.done || 0,
       current: null,
@@ -917,11 +1139,13 @@ function startPractice(fresh = false, kind = 'practice') {
       cleanRun: p.cleanRun || 0,
       pbnScene: p.pbnScene || pbnNextScene().id,
       pbnTotal: p.pbnTotal || words.length,
+      headTries: p.headTries || 0,   // applied to the first word nextWord() pulls
     };
   } else {
     if (kind === 'practice') { data.paused = null; save(); }
     session = {
       listId: list.id,
+      lang,
       queue: kind === 'learn' ? words.slice() : shuffle(words),
       done: 0,
       current: null,
@@ -939,9 +1163,17 @@ function startPractice(fresh = false, kind = 'practice') {
     }
   }
   show('practice');
+  keepAudioUnmuted();   // inside the tap that started the game — iOS needs that
   $('view-practice').classList.toggle('test-mode', session.kind === 'test');
   pbnRenderMini(true);
   nextWord();
+}
+
+// Delayed "next word" that only fires for the session that scheduled it.
+// Quit → Resume (or a new game) within the delay used to skip a word.
+function nextWordLater(ms) {
+  const s = session;
+  setTimeout(() => { if (session === s) nextWord(); }, ms);
 }
 
 function updateProgress() {
@@ -952,6 +1184,7 @@ function updateProgress() {
 }
 
 function nextWord() {
+  if (!session) return;
   $('attempts').innerHTML = '';
   $('reveal-box').classList.add('hidden');
   $('btn-spellout').classList.add('hidden');
@@ -962,7 +1195,9 @@ function nextWord() {
   $('learn-card').classList.add('hidden');
   if (!session.queue.length) { finishSession(); return; }
   session.current = session.queue.shift();
-  session.tries = 0;
+  session.tries = session.headTries || 0;
+  session.headTries = 0;
+  session.lastWrong = null;
   session.mode = 'spell';
   if (!session.results[session.current]) session.results[session.current] = { misses: 0, firstTry: null };
   updateProgress();
@@ -970,7 +1205,7 @@ function nextWord() {
   $('prompt-msg').textContent = 'Listen… then spell it! 👂';
   renderWordPic(session.current);
   saveSession();
-  speak(session.current);
+  speak(session.current, 1, session.lang);
   $('answer').focus();
 }
 
@@ -980,21 +1215,23 @@ function renderLearnWord() {
   $('learn-card').classList.remove('hidden');
   $('prompt-msg').textContent = 'Look, listen, and say it aloud 👂';
   $('learn-word').textContent = word;
-  const parts = syllabifySpanish(word);
+  // syllable splitting is Spanish-only logic — hide it for English lists
+  const parts = session.lang === 'en' ? null : syllabifySpanish(word);
   $('learn-syllables').classList.toggle('hidden', !parts);
   $('learn-syllables').textContent = parts ? parts.join(' · ') : '';
   const stars = masteryFor(session.listId, word).stars;
   $('word-mastery').textContent = `Mastery ${'★'.repeat(stars)}${'☆'.repeat(3 - stars)}`;
   renderWordPic(word);
   saveSession();
-  speak(word);
+  speak(word, 1, session.lang);
 }
 
 function finishLearnWord() {
+  if (!session || !session.current) return;   // double-tap on Next skipped a word
   session.current = null;
   session.done++;
   updateProgress();
-  setTimeout(nextWord, 150);
+  nextWordLater(150);
 }
 
 // Prefers the enriched AI picture over the built-in emoji; falls back to emoji
@@ -1006,6 +1243,7 @@ function renderWordPic(word, el, listId) {
   if (ex && ex.image) {
     pic.innerHTML = '';
     const img = document.createElement('img');
+    img.crossOrigin = 'anonymous';   // must match preloadImage so the cached copy is reused
     img.src = ex.image;
     img.alt = '';
     img.addEventListener('error', () => {
@@ -1029,8 +1267,10 @@ function renderAttemptRow(attempt, target) {
     const ac = a[i], tc = t[i];
     const tile = document.createElement('div');
     tile.className = 'tile';
-    if (ac === ' ' || (ac === undefined && tc === ' ')) {
+    if ((ac === ' ' || ac === undefined) && tc === ' ') {
       tile.classList.add('space');
+    } else if (ac === ' ') {
+      tile.classList.add('bad');                // a space where a letter belongs
     } else if (ac === undefined) {
       tile.classList.add('missing');            // a letter is missing — empty dashed box
     } else {
@@ -1060,7 +1300,7 @@ function completeWord() {
   $('btn-check').disabled = true;
   updateProgress();
   saveSession();
-  setTimeout(nextWord, 1400);
+  nextWordLater(1400);
 }
 
 function revealWord() {
@@ -1071,13 +1311,14 @@ function revealWord() {
   $('btn-spellout').classList.remove('hidden');
   $('prompt-msg').textContent = 'Look at the word, then type it 👀';
   session.mode = 'copy';
+  session.lastWrong = null;
   if (!session.requeued.has(word)) {   // sneak it back in later for a hidden re-test (once)
     session.requeued.add(word);
     const pos = Math.min(session.queue.length, 2 + Math.floor(Math.random() * (session.queue.length + 1)));
     session.queue.splice(pos, 0, word);
   }
   saveSession();
-  speak(word);
+  speak(word, 1, session.lang);
   $('answer').value = '';
   $('answer').focus();
 }
@@ -1086,7 +1327,7 @@ function check() {
   if (!session || !session.current || $('btn-check').disabled) return;
   const raw = $('answer').value;
   const word = session.current;
-  if (!canon(raw)) { speak(word); return; }   // empty check = just say it again
+  if (!canon(raw)) { speak(word, 1, session.lang); return; }   // empty check = just say it again
   const res = session.results[word];
 
   if (session.mode === 'copy') {
@@ -1103,6 +1344,12 @@ function check() {
   }
 
   const m = matches(raw, word);
+  // The wrong answer stays in the box, so a quick double Enter/Check used to
+  // spend two tries on one mistake. Same wrong answer again = no new try.
+  if (m === 'no' && canon(raw) === session.lastWrong) {
+    $('prompt-msg').textContent = 'Change some letters, then check again ✏️';
+    return;
+  }
   if (m !== 'no') {
     if (res.firstTry === null) res.firstTry = session.tries === 0;
     // Points count once per word, and never for a word that's already been
@@ -1124,12 +1371,13 @@ function check() {
     completeWord();
   } else {
     session.tries++;
+    session.lastWrong = canon(raw);
     res.misses++;
     session.cleanRun = 0;
     if (!res.masteryRecorded) { recordMastery(session.listId, word, false); res.masteryRecorded = true; }
     if (res.firstTry === null) res.firstTry = false;
     chime(false);
-    renderAttemptRow(raw, word);
+    if (session.kind !== 'test') renderAttemptRow(raw, word);   // Test gives no letter feedback
     saveSession();
     const left = session.kind === 'test' ? 0 : 1 + data.settings.retries - session.tries;
     if (session.kind === 'test') {
@@ -1139,7 +1387,7 @@ function check() {
       $('prompt-msg').textContent = left === 1
         ? 'One more try — you can do it! 💪'
         : `Try again! (${left} tries left) 💪`;
-      speak(word);
+      speak(word, 1, session.lang);
       $('answer').select();
     } else {
       revealWord();
@@ -1153,7 +1401,8 @@ function finishSession() {
   const tricky = words.filter(w => session.results[w].misses > 0);
 
   const list = data.lists.find(l => l.id === session.listId);
-  if (list && session.kind !== 'learn') list.lastResult = { perfect: perfect.length, total: words.length, at: Date.now() };
+  // "last time X/Y" on home describes a full Practice round, not a 2-word Trouble round
+  if (list && session.kind === 'practice') list.lastResult = { perfect: perfect.length, total: words.length, at: Date.now() };
   if (session.kind !== 'learn') {
     data.progress.totalPoints += session.pointsEarned;
     updateStreak();
@@ -1179,16 +1428,23 @@ function finishSession() {
   $('done-points').textContent = session.kind === 'learn' ? 'Now try Practice when you feel ready' : `⭐ +${session.pointsEarned} points · ${data.progress.totalPoints} total`
     + (data.progress.streak > 1 ? ` · 🔥 ${data.progress.streak}-day streak` : '');
 
+  // "again" repeats the mode she just played (Trouble falls back to Practice
+  // once no trouble words are left)
+  againKind = session.kind;
+  if (againKind === 'trouble' && !(list && list.words.some(w => troubleFor(list.id, w)))) againKind = 'practice';
+  $('btn-again').textContent = { learn: 'Learn again 🔁', test: 'Test again 🔁', trouble: 'Trouble words again 🔁' }[againKind] || 'Practice again 🔁';
+
   const box = $('tricky-box'), listEl = $('tricky-list');
   listEl.innerHTML = '';
   box.classList.toggle('hidden', !tricky.length);
+  const lng = session.lang;   // captured — session may be gone when the buttons fire
   tricky.forEach(w => {
     const div = document.createElement('div');
     div.className = 'tricky-item';
     const btn = document.createElement('button');
     btn.textContent = '🔊';
     btn.setAttribute('aria-label', 'Say ' + w);
-    btn.addEventListener('click', () => speak(w));
+    btn.addEventListener('click', () => speak(w, 1, lng));
     const span = document.createElement('span');
     span.textContent = w;
     div.append(btn, span);
@@ -1215,6 +1471,7 @@ function finishSession() {
 // One letter is revealed free at the start; hidden letters show as underlines.
 // Points bank immediately per rescue; mastery/trouble/streak are practice-only.
 const H_ROWS = ['abcdefghi', 'jklmnñopq', 'rstuvwxyz'];
+const H_ROWS_EN = ['abcdefghi', 'jklmnopqr', 'stuvwxyz'];   // no ñ for English lists
 const H_MAX_WRONG = 6;
 const H_POINTS_PER_WIN = 5;
 let hSession = null;
@@ -1226,6 +1483,7 @@ function startHangman() {
   if (!list || !list.words.length) return;
   hSession = {
     listId: list.id,
+    lang: listLang(list),
     queue: shuffle(list.words),
     current: null,
     chars: [],
@@ -1241,6 +1499,7 @@ function startHangman() {
   $('h-play').classList.remove('hidden');
   $('h-done').classList.add('hidden');
   show('hangman');
+  keepAudioUnmuted();
   hNextWord();
 }
 
@@ -1278,7 +1537,7 @@ function hNextWord() {
   hDraw();
   hRenderTiles(false);
   hRenderKeys();
-  speak(word);
+  speak(word, 1, hSession.lang);
 }
 
 function hDraw() {
@@ -1310,7 +1569,7 @@ function hRenderTiles(showAll) {
 function hRenderKeys() {
   const box = $('h-keys');
   box.innerHTML = '';
-  H_ROWS.forEach(row => {
+  (hSession.lang === 'en' ? H_ROWS_EN : H_ROWS).forEach(row => {
     const r = document.createElement('div');
     r.className = 'h-krow';
     row.split('').forEach(ch => {
@@ -1373,14 +1632,15 @@ function hWordDone(win) {
   } else {
     hRenderTiles(true);
     $('h-msg').textContent = `The word was “${word}” — it'll come back! 💪`;
-    speak(word);
+    speak(word, 1, hSession.lang);
     if (!hSession.requeued.has(word)) {   // one more chance at the end of the round
       hSession.requeued.add(word);
       hSession.queue.push(word);
     }
   }
   hUpdateProgress();
-  setTimeout(hNextWord, win ? 1600 : 2600);
+  const s = hSession;   // only for THIS game — quit + 🎈 again used to skip a word
+  setTimeout(() => { if (hSession === s) hNextWord(); }, win ? 1600 : 2600);
 }
 
 function hFinish() {
@@ -1435,22 +1695,25 @@ function confettiBurst() {
 }
 
 /* ---------- settings ---------- */
-function populateVoiceSelect() {
-  const sel = $('voice-select');
+function fillVoiceSelect(sel, pool, autoLabel, savedURI) {
   if (!sel) return;
-  const es = spanishVoices();
   sel.innerHTML = '';
   const auto = document.createElement('option');
   auto.value = '';
-  auto.textContent = 'Auto — best Spanish voice';
+  auto.textContent = autoLabel;
   sel.appendChild(auto);
-  es.forEach(v => {
+  pool.forEach(v => {
     const o = document.createElement('option');
     o.value = v.voiceURI;
     o.textContent = `${v.name} (${v.lang})`;
     sel.appendChild(o);
   });
-  sel.value = es.some(v => v.voiceURI === data.settings.voiceURI) ? data.settings.voiceURI : '';
+  sel.value = pool.some(v => v.voiceURI === savedURI) ? savedURI : '';
+}
+
+function populateVoiceSelect() {
+  fillVoiceSelect($('voice-select'), spanishVoices(), 'Auto — best Spanish voice', data.settings.voiceURI);
+  fillVoiceSelect($('voice-select-en'), englishVoices(), 'Auto — best English voice', data.settings.voiceURIEn);
 }
 
 function applySettingsUI() {
@@ -1478,7 +1741,9 @@ function init() {
     updateVoiceBanner();
   });
 
-  $('btn-edit-back').addEventListener('click', () => show('home'));
+  $('btn-edit-back').addEventListener('click', () => { stopImageGen(); show('home'); });
+  $('lang-es').addEventListener('click', () => setEditingLang('es'));
+  $('lang-en').addEventListener('click', () => setEditingLang('en'));
   $('words-input').addEventListener('input', renderChips);
   $('btn-save-list').addEventListener('click', saveList);
   $('btn-delete-list').addEventListener('click', deleteList);
@@ -1493,10 +1758,12 @@ function init() {
     renderHome();
     show('home');
   });
-  $('btn-say').addEventListener('click', () => session && session.current && speak(session.current));
-  $('btn-slow').addEventListener('click', () => session && session.current && speak(session.current, 0.55));
-  $('btn-spellout').addEventListener('click', () => session && session.current && speakSpelled(session.current));
+  $('btn-say').addEventListener('click', () => session && session.current && speak(session.current, 1, session.lang));
+  $('btn-slow').addEventListener('click', () => session && session.current && speak(session.current, 0.55, session.lang));
+  $('btn-spellout').addEventListener('click', () => session && session.current && speakSpelled(session.current, session.lang));
   $('btn-check').addEventListener('click', check);
+  // don't let tapping Check blur the input — iOS won't reopen the keyboard from a timer
+  $('btn-check').addEventListener('pointerdown', e => e.preventDefault());
   $('answer').addEventListener('keydown', e => {
     if (e.key === 'Enter') { e.preventDefault(); check(); }
   });
@@ -1513,7 +1780,7 @@ function init() {
     });
   });
 
-  $('btn-again').addEventListener('click', () => startPractice(true));
+  $('btn-again').addEventListener('click', () => startPractice(true, againKind));
   $('btn-done-home').addEventListener('click', () => { renderHome(); show('home'); });
 
   $('btn-hangman').addEventListener('click', startHangman);
@@ -1523,8 +1790,8 @@ function init() {
     renderHome();
     show('home');
   });
-  $('h-say').addEventListener('click', () => hSession && hSession.current && speak(hSession.current));
-  $('h-slow').addEventListener('click', () => hSession && hSession.current && speak(hSession.current, 0.55));
+  $('h-say').addEventListener('click', () => hSession && hSession.current && speak(hSession.current, 1, hSession.lang));
+  $('h-slow').addEventListener('click', () => hSession && hSession.current && speak(hSession.current, 0.55, hSession.lang));
   $('h-sentence').addEventListener('click', () => hSession && hSession.current && speakSentence(hSession.current, hSession.listId));
   $('h-again').addEventListener('click', startHangman);
   $('h-home').addEventListener('click', () => { hSession = null; renderHome(); show('home'); });
@@ -1532,6 +1799,8 @@ function init() {
   $('btn-settings-back').addEventListener('click', () => { renderHome(); show('home'); });
   $('voice-select').addEventListener('change', e => { data.settings.voiceURI = e.target.value; save(); });
   $('btn-test-voice').addEventListener('click', () => speak('¡Hola! ¿Lista para practicar? Mariposa.'));
+  $('voice-select-en').addEventListener('change', e => { data.settings.voiceURIEn = e.target.value; save(); });
+  $('btn-test-voice-en').addEventListener('click', () => speak('Hello! Ready to practice? Butterfly.', 1, 'en'));
   $('rate-slider').addEventListener('input', e => {
     data.settings.rate = Number(e.target.value);
     $('rate-value').textContent = data.settings.rate.toFixed(2) + '× speed';

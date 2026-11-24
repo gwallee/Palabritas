@@ -7,7 +7,8 @@
   const LETTERS = /^[a-záéíóúüñ]+$/i;
   const STRONG = /[aeoáéíóú]/i;
   const ACCENTED_WEAK = /[íú]/i;
-  const ONSET_2 = new Set(['bl','br','ch','cl','cr','dr','fl','fr','gl','gr','ll','pl','pr','rr','tr']);
+  // 'tl' stays together (a·tle·ta, ná·huatl) — the Mexican convention, matching the es-MX voice
+  const ONSET_2 = new Set(['bl','br','ch','cl','cr','dr','fl','fr','gl','gr','ll','pl','pr','rr','tr','tl']);
 
   function vowelTogether(a, b) {
     if (ACCENTED_WEAK.test(a) || ACCENTED_WEAK.test(b)) return false;
@@ -17,15 +18,16 @@
   function syllabifySpanish(value) {
     const word = String(value || '').trim().toLowerCase().normalize('NFC');
     if (!word || !LETTERS.test(word) || !VOWEL.test(word)) return null;
+    if (/^sub[lr]/.test(word)) return null;   // sub·ra·yar vs su·bli·me — prefix, can't tell
     const nuclei = [];
     for (let i = 0; i < word.length;) {
       if (!VOWEL.test(word[i])) { i++; continue; }
       const start = i++;
-      while (i < word.length && (VOWEL.test(word[i]) || (word[i] === 'h' && VOWEL.test(word[i + 1])))) {
-        const prev = word[i - 1];
-        const next = word[i] === 'h' ? word[i + 1] : word[i];
-        if (!next || !vowelTogether(prev, next)) break;
-        i += word[i] === 'h' ? 2 : 1;
+      // h is always a consonant here: joining vowels across it turned
+      // ca·ca·hua·te into ca·cahua·te and chi·hua·hua into one syllable.
+      while (i < word.length && VOWEL.test(word[i])) {
+        if (!vowelTogether(word[i - 1], word[i])) break;
+        i++;
       }
       nuclei.push([start, i]);
     }

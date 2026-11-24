@@ -1,6 +1,6 @@
 # Palabritas — project handoff
 
-Offline Spanish spelling-practice PWA for Brian's 8-year-old daughter. Two iPhones in the
+Offline spelling-practice PWA (Spanish AND English since v2.0) for Brian's 8-year-old daughter. Two iPhones in the
 household (Brian + wife) install it from Safari via Add to Home Screen. No accounts, no
 backend; word lists and scores live in each device's localStorage.
 
@@ -44,13 +44,38 @@ backend; word lists and scores live in each device's localStorage.
   for testing in the Claude Code browser pane.
 - `manifest.webmanifest`, icons — PWA install metadata.
 
+## Languages (v2.0)
+
+- Each list has `lang: 'es' | 'en'` (missing = `'es'`, so every pre-v2.0 list stays
+  Spanish). Chosen with a 🇲🇽/🇺🇸 toggle in the list editor; `listLang()` is the accessor.
+- Everything downstream follows the list's language: `speak(text, rateMul, lang)` picks
+  the voice (`settings.voiceURI` for es, `settings.voiceURIEn` for en — both have pickers
+  + test buttons in settings; auto order en-us → en-gb → en-au → en), 💬 uses
+  `SENTENCE_FRAMES_EN` for en, hangman renders `H_ROWS_EN` (26 keys, no ñ), Learn hides
+  the Spanish-only syllable split, and 🔤 spell-out speaks letters in the list's language.
+- Praise/celebration speech stays Spanish on purpose (app personality), as do the UI's
+  Spanish flourishes. Accent leniency logic is untouched — English words simply have no
+  accents, so it never triggers; ñ rules are moot on the English keyboard.
+- `lang: "en"` rides along in the cloud payload, the lists/ files, and the share text
+  (a `🌐 english` marker line that paste-import absorbs into the toggle; parseWords
+  skips 📚 and 🌐 lines). Sync applies lang to an existing list ONLY when the repo file
+  carries an explicit `"lang"` — a file without one says nothing about language. This is
+  deliberate (v2.0.1): the relay originally stripped `lang` from every publish, and
+  treating "no lang" as Spanish reverted English lists on every sync (Brian's revert
+  bug, 2026-11-01). The relay (apps-script/Code.gs) must preserve `lang` — if English
+  lists ever start reverting again, FIRST check that the deployed Apps Script is current
+  (Brian must re-paste Code.gs and Deploy → Manage deployments → New version).
+- Home shows "· 🇺🇸 English" on English lists. Emoji hints are Spanish-keyed, so English
+  words usually have none — the 🎨 picture button / extras cover English lists.
+
 ## Data model (localStorage key `palabritas`)
 
 ```
-{ lists: [{ id, name, words[], createdAt, lastResult?, extras? }],
+{ lists: [{ id, name, words[], lang?, createdAt, lastResult?, extras? }],
   activeListId,
-  paused: null | { listId, queue[], done, results, requeued[], pointsEarned, savedAt },
-  settings: { voiceURI, rate, strict, retries },
+  paused: null | { listId, queue[], done, results, requeued[], pointsEarned, headTries, savedAt },
+  deletedCloud?: { <repo file id>: <sha deleted> | true },   // v2.1: deleted cloud lists stay deleted
+  settings: { voiceURI, voiceURIEn, rate, strict, retries },
   progress: { totalPoints, streak, lastPracticeDate, mastery, trouble } }
 ```
 
@@ -98,7 +123,10 @@ backend; word lists and scores live in each device's localStorage.
 - **This is the app's only external dependency** — everything else is self-hosted.
   Offline reliability
   after the first load depends on the service worker's runtime cache for
-  `image.pollinations.ai` (sw.js) — an image never seen before while online just isn't
+  `image.pollinations.ai` (sw.js) — its own `palabritas-img` cache (survives
+  deploys, capped at 400). Images MUST load with `crossOrigin='anonymous'`
+  (Pollinations sends ACAO `*`): before v2.1 they were opaque no-cors responses
+  (`ok === false`) and were never cached at all — an image never seen before while online just isn't
   cached, and falls back to emoji when offline. This tradeoff was discussed with Brian
   and accepted (see State / history) because downloading+committing actual image files
   isn't possible from an in-app button — GitHub's prefilled-commit trick only takes one
@@ -121,11 +149,20 @@ backend; word lists and scores live in each device's localStorage.
      pre-filled via `/new/main?filename=lists/<id>.json&value=…`, which only completes
      signed in with write access (that's Brian only — this is exactly why the wife's lists
      never synced, discovered 2026-09-22). Includes `extras` (per-word emoji/sentence/
-     image) when present. Ids are `YYYY-MM-DD-<name-slug>` so the directory sorts
-     chronologically.
+     image) when present. Ids are `YYYY-MM-DD-<name-slug>-<4 random>` (random tail since
+     v2.1 — two phones naming lists "Week of Nov 3" the same day used to share one file
+     and overwrite each other) so the directory sorts chronologically.
      Sync lists the folder via the GitHub contents API (unauthenticated, 60 req/h/IP) and
      uses each file's blob `sha` (stored as `cloudSha` on the list) to skip unchanged
-     files. When a synced cloud list matches a local list by name+words, the local one is
+     files. The body comes from raw.githubusercontent.com, which caches ~5 min, so
+     v2.1 hashes it (`blobShaMatches`) and ignores a body that isn't the listed sha —
+     storing new-sha + old-body froze phones on stale words. Syncs are single-flight
+     (`syncCloudLists` wraps `doSyncCloudLists`). `pendingCloud` is set BEFORE the
+     relay POST (in-flight counts as pending). A permanent relay refusal (bad data,
+     >100 words, wrong PIN) sets `cloudError` (⚠️ on home) instead of ⏳-forever;
+     only `GitHub…`/`No GITHUB_TOKEN` errors and network failures retry.
+     Promotion (`dropPromotedLocal`) moves mastery/trouble keys, lastResult and
+     the paused round to the cloud id. When a synced cloud list matches a local list by name+words, the local one is
      dropped (it was just promoted) so it doesn't appear twice.
    - `lists.json` — legacy single feed, newest first, fetched from raw main with the
      deployed copy as fallback. Still fine for hand edits / Claude-committed lists.
@@ -145,7 +182,7 @@ backend; word lists and scores live in each device's localStorage.
    A malformed JSON file fails silently (sync skips it) — if a list doesn't appear on
    phones, validate the JSON first.
 
-## Paint-by-number pictures (v2.0, Brian: "a challenge/game where correct answers paint")
+## Paint-by-number pictures (v2.2, Brian: "a challenge/game where correct answers paint")
 
 - Each **Practice** or **Trouble Words** round paints one picture: every scored correct
   answer (same gate as points — `res.scored`) fills a proportional share of the scene's
@@ -274,7 +311,34 @@ git push origin main && git push origin main:gh-pages
   iPhone silent switch on (ported from MathFacts after Brian hit the muted-in-the-car
   mystery; Safari 16.4+, no-op elsewhere). Whether it also unmutes speechSynthesis on
   Brian's iOS version was untested at commit time.
-  v1.9.0 (current): Apps Script cloud-save relay. Root cause found 2026-09-22: the wife's
+  v2.0.2: silent-switch fix hardened. Brian hit it again 2026-11-06 — sound worked,
+  then a NEW game came up silent until he flipped the ring switch; so
+  `audioSession.type = 'playback'` alone isn't reliable (iOS can hand the session
+  back as ambient after an interruption). Added `keepAudioUnmuted()`: a looping,
+  fully silent generated-WAV `<audio>` element started on any tap (gesture needed)
+  and paused when the app is hidden — a playing media element keeps the page in
+  the playback category. Also `chime()` now resumes the AudioContext for ANY
+  non-running state (iOS uses 'interrupted', not just 'suspended'). Side effect:
+  tapping in the app pauses music from other apps (same as any media app).
+  If it still mutes, next suspects: speechSynthesis having its own session.
+  v2.1.0: full-stack review fixes (2026-11-06). Silent loop now only on game views
+  (practice/hangman/done) and torn down on leave/hide (it was stopping the parents'
+  music on any tap). Sync: sha-verified bodies, single-flight, pending-before-POST,
+  random cloudId tail, deleted cloud lists stay deleted, relay refusals → ⚠️,
+  progress carried over on promotion. Game: NFC normalization in canon/parseWords/
+  sync (decomposed ñ matched n), stale next-word timers guarded per session
+  (quit→resume skipped a word; hangman too), same-wrong-answer double submit
+  ignored, Learn double-tap guarded, resume keeps tries (`headTries`), copy-mode
+  second reveal no longer dropped on pause, Test hides tiles, lastResult only from
+  Practice, "again" repeats the mode, misplaced space = red tile. UI: ⚙️ z-index
+  (logo covered it), Practice tile keeps its layout, novelty iOS voices never
+  auto-picked, Check doesn't blur the input. syllables.js: never joins across h
+  (ca·ca·hua·te), `tl` onset (a·tle·ta), `sub[lr]…` → null.
+  **Deferred by Brian (do at a computer, needs Code.gs redeploy):** relay security —
+  restrict `image` to `https://image.pollinations.ai/`, add a parent PIN setting in
+  the app + set `PARENT_PIN`, size/rate limits, `waitLock` inside the try, and
+  optionally refuse overwriting a file without the base sha.
+  v1.9.0: Apps Script cloud-save relay. Root cause found 2026-09-22: the wife's
   lists never reached GitHub because ☁️ Save to cloud's prefilled-commit page needs repo
   write access, which only Brian's account has (no PRs/forks ever arrived — her words
   were stranded in her phone's localStorage). ☁️ now POSTs to the relay when
@@ -282,7 +346,7 @@ git push origin main && git push origin main:gh-pages
   Setup completed 2026-09-22: relay deployed ("Anyone" access, no PIN set),
   `CLOUD_SYNC_URL` set in app.js, `testConnectivity()` verified HTTP 200. The old
   Brian-only prefilled-commit flow remains as the fallback if the URL is ever emptied.
-  v1.9.1 (current): auto-sync — every editor **Save list** also POSTs to the relay
+  v1.9.1: auto-sync — every editor **Save list** also POSTs to the relay
   (quietly), so lists appear on the other phone with no button pressing; ☁️ stays as a
   loud manual push. A failed/offline publish sets `pendingCloud` on the list (⏳ after
   its name on home) and retries on next app open and on the `online` event, BEFORE
@@ -292,8 +356,15 @@ git push origin main && git push origin main:gh-pages
   and `dropPromotedLocal` never drops a `pendingCloud` list, but does match by `cloudId`.
   Known accepted tradeoff: two phones editing the SAME list offline → last publish wins
   (no merge). Points/streak sync is still explicitly out (per 2026-08-25 decision).
-  v2.0.0 (current): 🎨 paint-by-number reward pictures + 🖼 Museo gallery (see the
-  Paint-by-number section). SW precache gains `paintings.js` (11 files now).
+  v2.0.0: per-list language — English lists with a proper English voice (see
+  Languages section). The "Spelling Bee 1-15" cloud list was marked `"lang": "en"` in the
+  same deploy (it was English words being read by the Spanish voice — the motivating
+  case, 2026-10-28). Note: app.js's APP_VERSION had been stuck at 1.8.2 through the
+  v1.9.x releases; it tracks again from 2.0.0.
+  v2.2.0 (current): 🎨 paint-by-number reward pictures + 🖼 Museo gallery (see the
+  Paint-by-number section; built in parallel with v2.0.x–v2.1.0 and merged on top,
+  which is why no v2.2 feature overlaps them). SW precache gains `paintings.js`.
+  Painting works the same for English lists — nothing in it is language-aware.
 - `lists.json` is committed empty (`[]`) — no AI/test lists were ever deployed; a "Cloud
   Test List" existed only inside a local test browser during development.
 - **Removed by Brian's request (2026-08-24, "that was an accident"):** an uncommitted
