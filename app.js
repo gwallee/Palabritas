@@ -22,6 +22,7 @@ const DEFAULTS = {
   paused: null,   // snapshot of an unfinished practice session (same device)
   settings: { voiceURI: '', rate: 0.95, strict: false, retries: 2 },
   progress: { totalPoints: 0, streak: 0, lastPracticeDate: null, mastery: {}, trouble: {} },
+  pbn: { next: 0, gallery: [] },   // paint-by-number: next scene pointer + finished pictures
 };
 
 function load() {
@@ -31,6 +32,7 @@ function load() {
       ...DEFAULTS, ...raw,
       settings: { ...DEFAULTS.settings, ...(raw.settings || {}) },
       progress: { ...DEFAULTS.progress, ...(raw.progress || {}) },
+      pbn: { ...DEFAULTS.pbn, ...(raw.pbn || {}) },
     };
   } catch (e) { /* corrupted storage — start fresh */ }
   return JSON.parse(JSON.stringify(DEFAULTS));
@@ -241,6 +243,7 @@ function renderHome() {
       box.appendChild(item);
     });
   }
+  renderMuseo();
 }
 
 /* ---------- edit / new list ---------- */
@@ -776,6 +779,63 @@ function speakSentence(word, listId) {
   speak(pick(SENTENCE_FRAMES).replace('{w}', word), 0.95);
 }
 
+/* ---------- paint-by-number rewards ---------- */
+// Scenes live in paintings.js (PAINTINGS + paintingSVG). Each Practice or
+// Trouble round paints one picture: every scored correct answer fills a
+// proportional share of the regions, and finishing the round completes the
+// picture (missed words never leave it unfinished — rewards shouldn't punish).
+// Test and Learn stay picture-free on purpose. Finished pictures collect in
+// the home-screen Museo; the gallery is per-device, like points and streaks.
+const pbnSceneById = id => PAINTINGS.find(p => p.id === id) || PAINTINGS[0];
+const pbnNextScene = () => PAINTINGS[(data.pbn.next || 0) % PAINTINGS.length];
+let pbnShown = 0;   // regions currently visible in the practice mini (for pop-in)
+
+function pbnActive() {
+  return !!(session && session.pbnScene && (session.kind === 'practice' || session.kind === 'trouble'));
+}
+
+function pbnProgress() {
+  const scene = pbnSceneById(session.pbnScene);
+  const scored = Object.values(session.results).filter(r => r.scored).length;
+  const target = Math.min(scene.regions.length,
+    Math.round(scored / Math.max(1, session.pbnTotal) * scene.regions.length));
+  return { scene, target };
+}
+
+function pbnRenderMini(initial) {
+  const strip = $('pbn-strip');
+  if (!pbnActive()) { strip.classList.add('hidden'); return; }
+  const { scene, target } = pbnProgress();
+  $('pbn-mini').innerHTML = paintingSVG(scene, target, initial ? Infinity : pbnShown);
+  pbnShown = target;
+  $('pbn-strip-label').textContent = `${scene.emoji} ${scene.name} · ${target}/${scene.regions.length}`;
+  strip.classList.remove('hidden');
+}
+
+function showPaintingOverlay(scene, at) {
+  $('pbn-overlay-pic').innerHTML = paintingSVG(scene, scene.regions.length);
+  $('pbn-overlay-caption').textContent = `${scene.emoji} ${scene.name}`
+    + (at ? ` · ${new Date(at).toLocaleDateString()}` : '');
+  $('pbn-overlay').classList.remove('hidden');
+}
+
+function renderMuseo() {
+  const gal = (data.pbn && data.pbn.gallery) || [];
+  $('museo-card').classList.toggle('hidden', !gal.length);
+  const grid = $('museo-grid');
+  grid.innerHTML = '';
+  gal.slice(-40).reverse().forEach(g => {   // newest first
+    const scene = PAINTINGS.find(p => p.id === g.id);
+    if (!scene) return;
+    const b = document.createElement('button');
+    b.className = 'museo-thumb';
+    b.setAttribute('aria-label', scene.name);
+    b.innerHTML = paintingSVG(scene, scene.regions.length);
+    b.addEventListener('click', () => showPaintingOverlay(scene, g.at));
+    grid.appendChild(b);
+  });
+}
+
 /* ---------- practice ---------- */
 const PRAISE = ['¡Muy bien!', '¡Excelente!', '¡Perfecto!', '¡Genial!', '¡Fantástico!', '¡Súper!', '¡Increíble!', '¡Qué buena ortografía!', '¡Lo clavaste!', '¡Eres una campeona!'];
 const MINI_STREAKS = { 3: '🔥 ¡3 seguidas!', 5: '🌟 ¡5 seguidas! ¡Imparable!', 10: '🚀 ¡10 seguidas! ¡Sensacional!' };
@@ -828,6 +888,8 @@ function saveSession() {
     pointsEarned: session.pointsEarned,
     kind: session.kind,
     cleanRun: session.cleanRun,
+    pbnScene: session.pbnScene,
+    pbnTotal: session.pbnTotal,
     savedAt: Date.now(),
   };
   save();
@@ -853,6 +915,8 @@ function startPractice(fresh = false, kind = 'practice') {
       pointsEarned: p.pointsEarned || 0,
       kind: p.kind || 'practice',
       cleanRun: p.cleanRun || 0,
+      pbnScene: p.pbnScene || pbnNextScene().id,
+      pbnTotal: p.pbnTotal || words.length,
     };
   } else {
     if (kind === 'practice') { data.paused = null; save(); }
@@ -869,9 +933,14 @@ function startPractice(fresh = false, kind = 'practice') {
       kind,
       cleanRun: 0,
     };
+    if (kind === 'practice' || kind === 'trouble') {
+      session.pbnScene = pbnNextScene().id;
+      session.pbnTotal = words.length;
+    }
   }
   show('practice');
   $('view-practice').classList.toggle('test-mode', session.kind === 'test');
+  pbnRenderMini(true);
   nextWord();
 }
 
@@ -1041,6 +1110,7 @@ function check() {
     if (!res.scored && !res.revealed) {
       session.pointsEarned += POINTS_BY_TRY[Math.min(session.tries, POINTS_BY_TRY.length - 1)];
       res.scored = true;
+      pbnRenderMini(false);   // paint this answer's share of the picture
     }
     chime(true);
     const clean = session.tries === 0 && !res.revealed;
@@ -1088,6 +1158,17 @@ function finishSession() {
     data.progress.totalPoints += session.pointsEarned;
     updateStreak();
   }
+  // Finish the paint-by-number picture (remaining regions fill in on the done
+  // screen — a hard list never leaves the painting incomplete) and hang it in
+  // the Museo.
+  let paintedScene = null, pbnFrom = 0;
+  if (pbnActive()) {
+    const prog = pbnProgress();
+    paintedScene = prog.scene;
+    pbnFrom = prog.target;
+    data.pbn.gallery.push({ id: paintedScene.id, at: Date.now() });
+    data.pbn.next = ((data.pbn.next || 0) + 1) % PAINTINGS.length;
+  }
   data.paused = null;   // finished — nothing to resume
   save();
 
@@ -1113,6 +1194,13 @@ function finishSession() {
     div.append(btn, span);
     listEl.appendChild(div);
   });
+
+  const pd = $('pbn-done');
+  pd.classList.toggle('hidden', !paintedScene);
+  if (paintedScene) {
+    $('pbn-done-pic').innerHTML = paintingSVG(paintedScene, paintedScene.regions.length, pbnFrom);
+    $('pbn-done-caption').textContent = `🎨 ¡Pintaste “${paintedScene.name}”! Cuadro nº ${data.pbn.gallery.length} de tu museo`;
+  }
 
   show('done');
   renderHome();
@@ -1451,6 +1539,8 @@ function init() {
   });
   $('strict-toggle').addEventListener('change', e => { data.settings.strict = e.target.checked; save(); });
   $('retries-select').addEventListener('change', e => { data.settings.retries = Number(e.target.value); save(); });
+
+  $('pbn-overlay').addEventListener('click', () => $('pbn-overlay').classList.add('hidden'));
 
   renderHome();
   applySettingsUI();

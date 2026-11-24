@@ -342,3 +342,38 @@ input[type=range] { width: 100%; accent-color: var(--coral); margin: 10px 0 4px;
   position: fixed; inset: 0; width: 100%; height: 100%;
   pointer-events: none; z-index: 50;
 }
+
+/* ---------- paint-by-number (practice reward + Museo) ---------- */
+.pbn-strip { display: flex; align-items: center; gap: 10px; margin: 2px 0 8px; }
+.pbn-thumb { width: 62px; height: 62px; flex: 0 0 auto; }
+.pbn-thumb svg { width: 100%; height: 100%; display: block; border-radius: 12px; box-shadow: var(--shadow); }
+.pbn-strip-label { font-size: .85rem; font-weight: 700; color: var(--muted); }
+
+.pbn-pop { animation: pbnPop .55s cubic-bezier(.2, 1.4, .4, 1) backwards; transform-box: fill-box; transform-origin: center; }
+@keyframes pbnPop {
+  0% { transform: scale(.2); opacity: 0; }
+  70% { transform: scale(1.12); opacity: 1; }
+  100% { transform: scale(1); }
+}
+
+.pbn-done { margin: 6px 0 10px; }
+.pbn-done-pic svg { width: min(74vw, 300px); height: auto; border-radius: 16px; box-shadow: var(--shadow); }
+.pbn-done-caption { font-weight: 800; margin: 8px 0 0; }
+
+.museo-grid { display: flex; gap: 8px; overflow-x: auto; padding: 4px 2px; -webkit-overflow-scrolling: touch; }
+.museo-thumb { width: 74px; height: 74px; flex: 0 0 auto; padding: 0; border: 0; background: none; cursor: pointer; font: inherit; }
+.museo-thumb svg { width: 100%; height: 100%; display: block; border-radius: 12px; box-shadow: var(--shadow); }
+
+.pbn-overlay {
+  position: fixed; inset: 0; z-index: 60;
+  background: rgba(45, 35, 55, .8);
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+}
+.pbn-overlay-inner { text-align: center; }
+.pbn-overlay-inner svg { width: min(86vw, 420px); height: auto; border-radius: 18px; box-shadow: 0 10px 40px rgba(0, 0, 0, .4); }
+.pbn-overlay-caption { color: #fff; font-weight: 800; font-size: 1.05rem; margin: 12px 0 2px; }
+.pbn-overlay-hint { color: rgba(255, 255, 255, .65); font-size: .8rem; margin: 0; }
+
+/* Test mode is deliberately austere — no painting there */
+.test-mode .pbn-strip { display: none !important; }

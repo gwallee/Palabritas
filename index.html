@@ -61,6 +61,12 @@
       <p>No words yet!<br>Add this week's spelling list to get started.</p>
     </div>
 
+    <div class="card museo hidden" id="museo-card">
+      <div class="card-label">🖼 MUSEO</div>
+      <div class="museo-grid" id="museo-grid"></div>
+      <p class="muted small">Pictures she painted by finishing practice rounds — tap one to see it big.</p>
+    </div>
+
     <button class="big-btn secondary" id="btn-new-list">＋ New word list</button>
 
     <div id="past-lists"></div>
@@ -108,6 +114,11 @@
         <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
       </div>
     </header>
+
+    <div class="pbn-strip hidden" id="pbn-strip" aria-hidden="true">
+      <div class="pbn-thumb" id="pbn-mini"></div>
+      <div class="pbn-strip-label" id="pbn-strip-label"></div>
+    </div>
 
     <div class="word-pic hidden" id="word-pic" aria-hidden="true"></div>
     <div class="speak-row">
@@ -208,6 +219,10 @@
     <div class="done-inner">
       <div class="done-emoji">🎉</div>
       <h2 id="done-title">¡Lo lograste!</h2>
+      <div class="pbn-done hidden" id="pbn-done">
+        <div class="pbn-done-pic" id="pbn-done-pic"></div>
+        <p class="pbn-done-caption" id="pbn-done-caption"></p>
+      </div>
       <div class="done-stars" id="done-stars"></div>
       <p class="done-summary" id="done-summary"></p>
       <p class="done-points" id="done-points"></p>
@@ -273,7 +288,16 @@
 </div>
 
 <canvas id="confetti"></canvas>
+  <div class="pbn-overlay hidden" id="pbn-overlay">
+    <div class="pbn-overlay-inner">
+      <div id="pbn-overlay-pic"></div>
+      <p class="pbn-overlay-caption" id="pbn-overlay-caption"></p>
+      <p class="pbn-overlay-hint">Tap anywhere to close</p>
+    </div>
+  </div>
+
 <script src="./syllables.js"></script>
+<script src="./paintings.js"></script>
 <script src="./app.js"></script>
 </body>
 </html>

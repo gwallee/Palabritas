@@ -33,6 +33,9 @@ backend; word lists and scores live in each device's localStorage.
   `image.pollinations.ai` requests (AI word pictures) get their own cache-first runtime
   caching branch, checked before the same-origin-only guard.
 - `lists.json` — the shared word-list feed (see below). Currently `[]`.
+- `paintings.js` — paint-by-number reward scenes (v2.0): six hand-drawn SVG scenes
+  (`PAINTINGS`) + the shared renderer `paintingSVG(scene, painted, popFrom)`. See the
+  Paint-by-number section below.
 - `apps-script/Code.gs` — cloud-save relay (v1.9): paste-in copy for a Google Apps
   Script web app that commits POSTed lists to `lists/` using a GitHub token stored in
   Script Properties. Setup steps are in its header comment. Lets the wife's phone
@@ -141,6 +144,40 @@ backend; word lists and scores live in each device's localStorage.
    The repo is the source of truth for cloud lists: repo edits overwrite them on sync.
    A malformed JSON file fails silently (sync skips it) — if a list doesn't appear on
    phones, validate the JSON first.
+
+## Paint-by-number pictures (v2.0, Brian: "a challenge/game where correct answers paint")
+
+- Each **Practice** or **Trouble Words** round paints one picture: every scored correct
+  answer (same gate as points — `res.scored`) fills a proportional share of the scene's
+  regions, shown live in a small thumbnail + "n/total" strip under the practice header
+  with a pop-in animation per region. **Finishing the round always completes the
+  picture** (the remainder fills in on the done screen with staggered pops) — Brian
+  chose "any correct spelling paints / never punishing" over first-try-only. Revealed
+  words never paint mid-round, but can't spoil the ending either.
+- **Test and Learn modes deliberately paint nothing** (Test is austere by design; the
+  strip is also CSS-hidden under `.test-mode`). Hangman doesn't paint either (Brian
+  picked "inside practice" over "both").
+- Finished pictures land in the **🖼 Museo** card on home (newest first, horizontal
+  scroll, shows up once the first picture exists; sits above ＋ New word list). Tapping
+  a thumbnail opens a full-screen overlay (`#pbn-overlay`, tap anywhere to close).
+  The gallery is **per-device** (like points/streaks — same explicit no-sync choice);
+  repeat completions of a scene are collected as separate cuadros.
+- Scenes rotate in order via `data.pbn.next`; `data.pbn.gallery` holds `{id, at}`.
+  Session fields `pbnScene`/`pbnTotal` ride in `session` and in `paused` (practice
+  resumes keep the partly painted picture; painted count is derived from scored
+  results, so it needs no extra state). Quitting a round without finishing abandons
+  progress but NOT the scene — the same scene restarts next round.
+- Scene art: themes chosen for an 8–9-year-old girl at Brian's request ("large enough
+  to be cool, not just a simple flower"): unicornio, sirena, castillo, gatito, delfín,
+  mariposa; 14–19 regions each, viewBox 0 0 100 100. Regions paint in array order
+  (backgrounds → subject → face/sparkles last); `deco` entries are outline details
+  (smiles, whiskers, rays) that appear with the region at index `when`. Unpainted
+  regions show their palette number like a real paint-by-number. The art was iterated
+  by screenshotting via Playwright/Chromium against `dev-server.mjs` — do the same when
+  adding scenes (harness pattern: render `paintingSVG(scene, N)` into a page, element
+  screenshot, look at it; three passes caught a horn-like ear, a plank-shaped mermaid
+  tail, and an unreadable dolphin). Adding scenes later is cheap: append to PAINTINGS
+  (older devices just cycle through more scenes; ids must stay stable for the gallery).
 
 ## Practice loop specifics
 
@@ -255,6 +292,8 @@ git push origin main && git push origin main:gh-pages
   and `dropPromotedLocal` never drops a `pendingCloud` list, but does match by `cloudId`.
   Known accepted tradeoff: two phones editing the SAME list offline → last publish wins
   (no merge). Points/streak sync is still explicitly out (per 2026-08-25 decision).
+  v2.0.0 (current): 🎨 paint-by-number reward pictures + 🖼 Museo gallery (see the
+  Paint-by-number section). SW precache gains `paintings.js` (11 files now).
 - `lists.json` is committed empty (`[]`) — no AI/test lists were ever deployed; a "Cloud
   Test List" existed only inside a local test browser during development.
 - **Removed by Brian's request (2026-08-24, "that was an accident"):** an uncommitted
